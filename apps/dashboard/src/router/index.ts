@@ -1,12 +1,14 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 
-// Views are lazy-loaded so the initial bundle stays small (spec section 87).
+// Public marketing landing lives at "/"; the authenticated dashboard lives
+// under "/app". Views are lazy-loaded so the initial bundle stays small.
 const routes: RouteRecordRaw[] = [
+  { path: "/", name: "landing", component: () => import("@/views/LandingView.vue"), meta: { public: true } },
   { path: "/login", name: "login", component: () => import("@/views/LoginView.vue"), meta: { public: true } },
   { path: "/welcome", name: "welcome", component: () => import("@/views/FirstRunView.vue"), meta: { public: true } },
   {
-    path: "/",
+    path: "/app",
     component: () => import("@/layouts/AppShell.vue"),
     children: [
       { path: "", name: "dashboard", component: () => import("@/views/DashboardView.vue") },
@@ -36,8 +38,8 @@ export const router = createRouter({
   routes,
 });
 
-// Auth guard: unauthenticated users go to /login. Frontend guards are UX only;
-// the API enforces authorization independently (never trusted here).
+// Auth guard: unauthenticated users hitting /app are sent to /login. Frontend
+// guards are UX only; the API enforces authorization independently.
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (!auth.checked) await auth.fetchSession();

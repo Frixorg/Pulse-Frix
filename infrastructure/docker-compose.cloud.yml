@@ -19,6 +19,7 @@ networks:
 volumes:
   pulse-postgres-data:
   pulse-prometheus-data:
+  pulse-agent-data:
   caddy-data:
   caddy-config:
 
@@ -124,4 +125,28 @@ services:
     volumes:
       - /:/host:ro,rslave
     networks: [pulse-net]
+    mem_limit: 128m
+
+  # OPT-IN agent to monitor THIS host from your own dashboard.
+  # 1) Sign in to the dashboard → Settings → Generate enrollment token
+  # 2) Put it in .env as AGENT_ENROLLMENT_TOKEN=pst_...
+  # 3) docker compose -f infrastructure/docker-compose.cloud.yml --env-file .env --profile agent up -d pulse-agent
+  # Uses host network + pid for accurate discovery, and reaches the API through
+  # the dashboard's local port (127.0.0.1:8090). Docker socket is READ-ONLY.
+  pulse-agent:
+    build:
+      context: ../agent
+    container_name: pulse-agent
+    profiles: ["agent"]
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    environment:
+      PULSE_MODE: cloud
+      PULSE_API_URL: http://127.0.0.1:8090
+      PULSE_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-}
+      PULSE_DATA_DIR: /data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - pulse-agent-data:/data
     mem_limit: 128m

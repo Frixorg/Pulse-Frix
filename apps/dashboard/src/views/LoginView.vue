@@ -18,7 +18,7 @@ async function submit() {
   busy.value = true;
   try {
     await auth.login(email.value, password.value);
-    const redirect = (route.query.redirect as string) || "/";
+    const redirect = (route.query.redirect as string) || "/app";
     router.push(redirect);
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : "Login failed";
@@ -61,6 +61,21 @@ async function submit() {
           {{ busy ? "Signing in…" : "Sign in" }}
         </button>
       </form>
+
+      <div class="flex items-center gap-3 my-4">
+        <span class="h-px flex-1 bg-border"></span>
+        <span class="text-xs text-muted">or</span>
+        <span class="h-px flex-1 bg-border"></span>
+      </div>
+      <div class="space-y-2">
+        <a href="/api/v1/auth/google/start" class="btn w-full justify-center border border-border hover:bg-surface-2">
+          Continue with Google
+        </a>
+        <a href="/api/v1/auth/telegram/start" class="btn w-full justify-center border border-border hover:bg-surface-2">
+          Continue with Telegram
+        </a>
+      </div>
+
       <p class="text-center text-xs text-muted mt-4">
         New here? <RouterLink to="/welcome" class="text-accent">Set up Pulse</RouterLink>
       </p>

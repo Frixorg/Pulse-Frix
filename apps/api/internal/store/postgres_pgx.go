@@ -144,6 +144,16 @@ func (p *Postgres) userWithMembership(userID string) (*model.User, *model.Member
 	return u, m, nil
 }
 
+func (p *Postgres) GetMembership(orgID, userID string) (*model.Membership, error) {
+	m := &model.Membership{}
+	err := p.db.QueryRow(`SELECT org_id,user_id,role FROM memberships WHERE org_id=$1 AND user_id=$2`, orgID, userID).
+		Scan(&m.OrgID, &m.UserID, &m.Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return m, err
+}
+
 func (p *Postgres) GetUser(orgID, userID string) (*model.User, error) {
 	u := &model.User{}
 	err := p.db.QueryRow(`

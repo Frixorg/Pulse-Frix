@@ -125,6 +125,17 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+func (m *Memory) GetMembership(orgID, userID string) (*model.Membership, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	mem, ok := m.memberships[userID]
+	if !ok || mem.OrgID != orgID {
+		return nil, ErrNotFound
+	}
+	cp := *mem
+	return &cp, nil
+}
+
 func (m *Memory) GetUser(orgID, userID string) (*model.User, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

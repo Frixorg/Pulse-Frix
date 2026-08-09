@@ -121,7 +121,7 @@ func Authenticate(st store.Store) Middleware {
 			if err == nil && cookie.Value != "" {
 				if sess, err := st.GetSession(auth.HashToken(cookie.Value)); err == nil {
 					if u, err := st.GetUser(sess.OrgID, sess.UserID); err == nil {
-						_, mem, _ := st.FindLoginByEmail(u.Email)
+						mem, _ := st.GetMembership(sess.OrgID, sess.UserID)
 						p := &auth.Principal{UserID: u.ID, OrgID: sess.OrgID, Email: u.Email, Role: roleOf(mem)}
 						r = r.WithContext(auth.WithPrincipal(r.Context(), p))
 					}

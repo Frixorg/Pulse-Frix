@@ -27,6 +27,9 @@ type Store interface {
 	FindLoginByEmail(email string) (*model.User, *model.Membership, error)
 	SeedOrgOwner(orgName, email, passwordHash string) (*model.Organization, *model.User, error)
 	GetUser(orgID, userID string) (*model.User, error)
+	// GetMembership resolves a user's role in an org by user id (not email), so
+	// it works for identity-provider users who share no email address.
+	GetMembership(orgID, userID string) (*model.Membership, error)
 
 	// UpsertOIDCUser finds the user for (provider, subject) or, on first login,
 	// creates a new tenant (org + owner user). Email may be empty.

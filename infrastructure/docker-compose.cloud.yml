@@ -27,6 +27,11 @@ services:
     image: caddy:2.8-alpine
     container_name: pulse-caddy
     restart: unless-stopped
+    # Caddy is OPT-IN: only runs with `--profile edge`, for hosts that have
+    # nothing on 80/443. If the box already has a web server (e.g. a mail
+    # server), leave this off and reverse-proxy the domain to the dashboard's
+    # local port instead (see docs/DEPLOYMENT.md).
+    profiles: ["edge"]
     ports:
       - "80:80"
       - "443:443"
@@ -87,6 +92,11 @@ services:
       context: ../apps/dashboard
     container_name: pulse-dashboard
     restart: unless-stopped
+    # Publish the dashboard on a LOCAL port so an existing web server can
+    # reverse-proxy the domain to it. Default binds to loopback only (safe);
+    # override with DASHBOARD_BIND (e.g. "0.0.0.0:8090") if you need it exposed.
+    ports:
+      - "${DASHBOARD_BIND:-127.0.0.1:8090}:80"
     depends_on: [pulse-api]
     networks: [pulse-net]
     mem_limit: 128m

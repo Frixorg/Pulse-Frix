@@ -1,0 +1,114 @@
+# =============================================================================
+# Pulse Cloud control plane (for pulse.frix.me). Runs the multi-tenant API +
+# dashboard + PostgreSQL + monitoring, fronted by Caddy for automatic TLS.
+# There is NO agent here — agents run on each monitored VPS and connect OUTBOUND.
+#
+# Deploy on the host that pulse.frix.me points to:
+#   cp .env.cloud.example .env   # then edit secrets + DASHBOARD_DOMAIN
+#   docker compose -f infrastructure/docker-compose.cloud.yml --env-file .env up -d
+#
+# Requires: DNS A/AAAA record for DASHBOARD_DOMAIN -> this host, ports 80+443 open.
+# =============================================================================
+name: pulse-cloud
+
+networks:
+  pulse-net:
+    name: pulse-net
+    driver: bridge
+
+volumes:
+  pulse-postgres-data:
+  pulse-prometheus-data:
+  caddy-data:
+  caddy-config:
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: pulse-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [pulse-dashboard]
+    networks: [pulse-net]
+
+  pulse-postgres:
+    image: postgres:16-alpine
+    container_name: pulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: pulse
+    volumes:
+      - pulse-postgres-data:/var/lib/postgresql/data
+    networks: [pulse-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pulse-api:
+    build:
+      context: ../apps/api
+      args:
+        TAGS: pgx # durable multi-tenant storage
+    container_name: pulse-api
+    restart: unless-stopped
+    environment:
+      PULSE_API_ADDR: ":8080"
+      PULSE_MODE: cloud # multi-tenant
+      PULSE_ENV: production
+      DATABASE_URL: postgres://pulse:${POSTGRES_PASSWORD}@pulse-postgres:5432/pulse?sslmode=disable
+      METRICS_URL: http://pulse-prometheus:9090
+      PULSE_SESSION_SECRET: ${PULSE_SESSION_SECRET:?set PULSE_SESSION_SECRET}
+      PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:?set PULSE_JWT_SIGNING_KEY}
+      PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
+      PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
+    depends_on:
+      pulse-postgres:
+        condition: service_healthy
+    networks: [pulse-net]
+    mem_limit: 512m
+
+  pulse-dashboard:
+    build:
+      context: ../apps/dashboard
+    container_name: pulse-dashboard
+    restart: unless-stopped
+    depends_on: [pulse-api]
+    networks: [pulse-net]
+    mem_limit: 128m
+
+  pulse-prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: pulse-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=${METRICS_RETENTION:-30d}
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - pulse-prometheus-data:/prometheus
+    networks: [pulse-net]
+    mem_limit: 512m
+
+  pulse-node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: pulse-node-exporter
+    restart: unless-stopped
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    networks: [pulse-net]
+    mem_limit: 128m

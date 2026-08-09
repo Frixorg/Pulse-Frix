@@ -176,6 +176,7 @@ pulse/
 - [AGENT_PROTOCOL.md](./docs/AGENT_PROTOCOL.md) — agent ↔ server protocol
 - [API.md](./docs/API.md) — REST API reference
 - [DATA_MODEL.md](./docs/DATA_MODEL.md) — entities & database schema
+- [DEPLOYMENT.md](./docs/DEPLOYMENT.md) — smoke test → self-hosted → cloud, step by step
 - [SELF_HOSTING.md](./docs/SELF_HOSTING.md) · [CLOUD_MODE.md](./docs/CLOUD_MODE.md)
 - [PRIVACY.md](./docs/PRIVACY.md) — exactly what data is collected
 - [INSTALL.md](./docs/INSTALL.md) · [TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md)

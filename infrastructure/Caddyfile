@@ -1,0 +1,7 @@
+# Caddy config for the Pulse Cloud control plane. Caddy obtains and renews TLS
+# certificates automatically (Let's Encrypt) for DASHBOARD_DOMAIN and reverse
+# proxies to the dashboard container (which itself proxies /api to pulse-api).
+{$DASHBOARD_DOMAIN} {
+	encode gzip
+	reverse_proxy pulse-dashboard:80
+}

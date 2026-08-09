@@ -8,7 +8,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import StatCard from "@/components/cards/StatCard.vue";
 import MetricChart from "@/components/charts/MetricChart.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
-import EmptyState from "@/components/EmptyState.vue";
+import OnboardingConnect from "@/components/OnboardingConnect.vue";
 import { bytes, uptime, tone, timeAgo } from "@/lib/format";
 
 const servers = useServersStore();
@@ -48,15 +48,10 @@ watch(selected, load);
 
 <template>
   <div>
-    <PageHeader title="Dashboard" subtitle="Is my infrastructure healthy?" />
-
-    <EmptyState
-      v-if="!selected"
-      title="No servers connected yet"
-      message="Install the Pulse agent on a VPS to start seeing infrastructure here. Pulse discovers everything read-only and changes nothing by default."
-    />
+    <OnboardingConnect v-if="!selected" />
 
     <template v-else>
+      <PageHeader title="Dashboard" subtitle="Is my infrastructure healthy?" />
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-3">
         <div class="card">
           <div class="card-title">VPS Health</div>

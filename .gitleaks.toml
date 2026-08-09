@@ -1,0 +1,30 @@
+# Gitleaks configuration for Pulse. Extends the default ruleset and allowlists
+# files that intentionally contain NON-secret placeholders and test fixtures
+# (e.g. fake JWTs used to test the redaction layer, example env values).
+# Real secrets committed outside these paths still fail the scan.
+title = "Pulse"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Docs, examples, tests and redaction fixtures contain placeholders, not secrets."
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''.*\.md$''',
+  '''.*_test\.go$''',
+  '''(^|/)internal/redact/.*''',
+  '''(^|/)docs/.*''',
+  '''(^|/)examples/.*''',
+  '''(^|/)packages/.*''',
+  '''(^|/)installer/.*''',          # only variable refs / runtime-generated secrets
+  '''(^|/)infrastructure/.*''',     # compose files use ${VAR} placeholders
+  '''docker-compose.*\.ya?ml$''',
+]
+regexes = [
+  '''CHANGE_ME''',
+  '''\*\*\*REDACTED\*\*\*''',
+  '''\bpst_[A-Za-z0-9_]+''',        # example enrollment tokens in docs
+  '''A{4,}''',                        # base64 padding in test vectors
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9''', # fixed test JWT header
+]

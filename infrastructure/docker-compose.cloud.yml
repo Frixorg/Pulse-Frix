@@ -60,7 +60,10 @@ services:
     build:
       context: ../apps/api
       args:
-        TAGS: pgx # durable multi-tenant storage
+        # Default: in-memory store (zero external deps, always builds).
+        # For durable Postgres storage set API_TAGS=pgx in your .env and rebuild
+        # (see the persistence note in docs/DEPLOYMENT.md).
+        TAGS: ${API_TAGS:-}
     container_name: pulse-api
     restart: unless-stopped
     environment:

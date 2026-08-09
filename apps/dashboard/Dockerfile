@@ -5,7 +5,8 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json ./
-RUN corepack enable && (pnpm install --no-frozen-lockfile || npm install)
+# Plain npm (no corepack/pnpm bootstrap, which needs an extra network fetch).
+RUN npm install --no-audit --no-fund
 COPY . .
 RUN npm run build
 

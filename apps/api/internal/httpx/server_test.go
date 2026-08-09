@@ -3,7 +3,6 @@ package httpx
 import (
 	"log/slog"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -30,25 +29,29 @@ func TestLoginAndAuthenticatedAccess(t *testing.T) {
 	ts, _ := newTestServer(t)
 	defer ts.Close()
 	client := ts.Client()
-	client.Jar, _ = cookiejar.New(nil)
 
 	// Unauthenticated access is rejected.
 	resp, err := client.Get(ts.URL + "/api/v1/servers")
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("want 401 unauthenticated, got %d", resp.StatusCode)
 	}
 
 	// Wrong password fails.
-	resp, _ = client.Post(ts.URL+"/api/v1/auth/login", "application/json",
+	resp, err = client.Post(ts.URL+"/api/v1/auth/login", "application/json",
 		strings.NewReader(`{"email":"owner@example.com","password":"wrong"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("want 401 for wrong password, got %d", resp.StatusCode)
 	}
 
-	// Correct login sets a session cookie (the client jar stores it).
+	// Correct login returns 200 and sets a session cookie.
 	resp, err = client.Post(ts.URL+"/api/v1/auth/login", "application/json",
 		strings.NewReader(`{"email":"owner@example.com","password":"supersecret123"}`))
 	if err != nil {
@@ -57,12 +60,25 @@ func TestLoginAndAuthenticatedAccess(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200 login, got %d", resp.StatusCode)
 	}
+	var sessionCookie *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == SessionCookie {
+			sessionCookie = c
+		}
+	}
+	resp.Body.Close()
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatal("login did not set a session cookie")
+	}
 
-	// Now authenticated access works.
-	resp, err = client.Get(ts.URL + "/api/v1/servers")
+	// Authenticated access works when the session cookie is attached.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/servers", nil)
+	req.AddCookie(sessionCookie)
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200 authenticated, got %d", resp.StatusCode)
 	}
@@ -75,6 +91,7 @@ func TestHealthz(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz want 200, got %d", resp.StatusCode)
 	}

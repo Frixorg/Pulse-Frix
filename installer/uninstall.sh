@@ -15,7 +15,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 PULSE_HOME="${PULSE_HOME:-/opt/pulse}"
 MANIFEST="$PULSE_HOME/pulse-manifest.json"
 ASSUME_YES=0
-[ "${1:-}" = "--yes" ] && ASSUME_YES=1
+if [ "${1:-}" = "--yes" ]; then ASSUME_YES=1; fi
 
 [ -f "$MANIFEST" ] || die "no Pulse manifest found at $MANIFEST; nothing to uninstall"
 

@@ -89,18 +89,20 @@ discover() {
     local kb; kb="$(awk '/MemTotal/{print $2}' /proc/meminfo)"
     RAM_GB="$(awk "BEGIN{printf \"%.0f\", ${kb:-0}/1024/1024}")"
   fi
-  DISK_HUMAN="$(df -h / 2>/dev/null | awk 'NR==2{print $2" total, "$4" free"}')"
-  [ -d /run/systemd/system ] && HAS_SYSTEMD=1
+  DISK_HUMAN="$(df -h / 2>/dev/null | awk 'NR==2{print $2" total, "$4" free"}')" || DISK_HUMAN="?"
+  # NOTE: use `if` blocks, never `cond && action` — under `set -e` a bare
+  # `cond && action` exits the script whenever `cond` is false.
+  if [ -d /run/systemd/system ]; then HAS_SYSTEMD=1; fi
 
   if have docker; then
     HAS_DOCKER=1
-    DOCKER_CONTAINERS="$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
-    DOCKER_NETWORKS="$(docker network ls -q 2>/dev/null | wc -l | tr -d ' ')"
+    DOCKER_CONTAINERS="$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')" || DOCKER_CONTAINERS=0
+    DOCKER_NETWORKS="$(docker network ls -q 2>/dev/null | wc -l | tr -d ' ')" || DOCKER_NETWORKS=0
     if docker compose version >/dev/null 2>&1 || have docker-compose; then HAS_COMPOSE=1; fi
   fi
   if have nginx || [ -f /etc/nginx/nginx.conf ]; then
     HAS_NGINX=1
-    NGINX_SITES="$(ls -1 /etc/nginx/sites-enabled 2>/dev/null | wc -l | tr -d ' ')"
+    NGINX_SITES="$(ls -1 /etc/nginx/sites-enabled 2>/dev/null | wc -l | tr -d ' ')" || NGINX_SITES=0
   fi
   port_in_use 5432 && HAS_POSTGRES=1 || true
   port_in_use 6379 && HAS_REDIS=1 || true
@@ -120,7 +122,9 @@ discover() {
   log "Nginx:         $([ "$HAS_NGINX" = 1 ] && echo "detected (${NGINX_SITES} sites)" || echo 'not detected')"
   log "PostgreSQL:    $([ "$HAS_POSTGRES" = 1 ] && echo 'detected (port 5432)' || echo 'not detected')"
   log "Redis:         $([ "$HAS_REDIS" = 1 ] && echo 'detected (port 6379)' || echo 'not detected')"
-  [ -n "$EXISTING_MON" ] && warn "Existing monitoring detected on ports:$EXISTING_MON (Pulse will coexist, never replace)"
+  if [ -n "$EXISTING_MON" ]; then
+    warn "Existing monitoring detected on ports:$EXISTING_MON (Pulse will coexist, never replace)"
+  fi
 }
 
 # =============================================================================
@@ -148,7 +152,7 @@ precheck() {
 plan() {
   # Choose a safe, unused dashboard port. NEVER assume 3000/9090/9100 are free.
   if [ -n "$DASH_PORT" ]; then
-    port_in_use "$DASH_PORT" && die "requested --dashboard-port $DASH_PORT is in use"
+    if port_in_use "$DASH_PORT"; then die "requested --dashboard-port $DASH_PORT is in use"; fi
   else
     DASH_PORT="$(find_free_port 3210)" || die "could not find a free port in 3210-3410"
   fi
@@ -174,8 +178,11 @@ plan() {
 }
 
 confirm() {
-  [ "$DRY_RUN" = 1 ] && { warn "--dry-run: stopping before Apply. Nothing was changed."; exit 0; }
-  [ "$ASSUME_YES" = 1 ] && return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    warn "--dry-run: stopping before Apply. Nothing was changed."
+    exit 0
+  fi
+  if [ "$ASSUME_YES" = 1 ]; then return 0; fi
   printf "Proceed with the plan above? [y/N] "
   read -r reply
   case "$reply" in y|Y|yes|YES) : ;; *) die "aborted by user; nothing was changed";; esac

@@ -19,6 +19,7 @@ type Memory struct {
 	orgs        map[string]*model.Organization
 	users       map[string]*model.User            // userID -> user
 	usersByMail map[string]string                 // email -> userID
+	oidcByKey   map[string]string                 // "provider:subject" -> userID
 	memberships map[string]*model.Membership      // userID -> membership (one org in v1)
 	sessions    map[string]*model.Session         // sessionID -> session
 	servers     map[string]*model.Server          // id -> server
@@ -39,6 +40,7 @@ func NewMemory() *Memory {
 		orgs:        map[string]*model.Organization{},
 		users:       map[string]*model.User{},
 		usersByMail: map[string]string{},
+		oidcByKey:   map[string]string{},
 		memberships: map[string]*model.Membership{},
 		sessions:    map[string]*model.Session{},
 		servers:     map[string]*model.Server{},
@@ -80,6 +82,47 @@ func (m *Memory) SeedOrgOwner(orgName, email, passwordHash string) (*model.Organ
 	m.usersByMail[email] = user.ID
 	m.memberships[user.ID] = &model.Membership{OrgID: org.ID, UserID: user.ID, Role: model.RoleOwner}
 	return org, user, nil
+}
+
+func (m *Memory) UpsertOIDCUser(provider, subject, email, name string) (*model.User, *model.Membership, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := provider + ":" + subject
+
+	// Existing OIDC identity → return it.
+	if uid, ok := m.oidcByKey[key]; ok {
+		return m.users[uid], m.memberships[uid], nil
+	}
+	// Existing account by email → link this identity to it.
+	if email != "" {
+		if uid, ok := m.usersByMail[strings.ToLower(email)]; ok {
+			m.oidcByKey[key] = uid
+			return m.users[uid], m.memberships[uid], nil
+		}
+	}
+
+	// New tenant: org + owner user.
+	orgName := firstNonEmpty(name, email, "Personal")
+	org := &model.Organization{ID: auth.NewID("org"), Name: orgName, CreatedAt: time.Now().UTC()}
+	user := &model.User{ID: auth.NewID("usr"), Email: strings.ToLower(email), Name: name, CreatedAt: time.Now().UTC()}
+	m.orgs[org.ID] = org
+	m.users[user.ID] = user
+	if email != "" {
+		m.usersByMail[strings.ToLower(email)] = user.ID
+	}
+	m.oidcByKey[key] = user.ID
+	mem := &model.Membership{OrgID: org.ID, UserID: user.ID, Role: model.RoleOwner}
+	m.memberships[user.ID] = mem
+	return user, mem, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (m *Memory) GetUser(orgID, userID string) (*model.User, error) {

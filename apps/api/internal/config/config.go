@@ -34,6 +34,21 @@ type Config struct {
 	EnableAutoTLS        bool
 	EnableRemoteActions  bool
 	EnableAutoUpdate     bool
+
+	// Public base URL (used to build OIDC redirect URIs), e.g. https://pulse.frix.me.
+	PublicURL string
+	// OIDC providers configured from the environment (Google, Telegram, ...).
+	OIDC []OIDCProvider
+}
+
+// OIDCProvider is one configured OpenID Connect identity provider.
+type OIDCProvider struct {
+	Name         string   // url slug, e.g. "google", "telegram"
+	Display      string   // human label
+	Issuer       string   // OIDC issuer (discovery = issuer + /.well-known/openid-configuration)
+	ClientID     string
+	ClientSecret string
+	Scopes       []string
 }
 
 func env(k, def string) string {
@@ -78,7 +93,46 @@ func Load() *Config {
 		EnableRemoteActions:  boolEnv("ENABLE_REMOTE_ACTIONS", false),
 		EnableAutoUpdate:     boolEnv("ENABLE_AUTO_UPDATE", false),
 	}
+
+	// Public URL for OIDC redirects: explicit PULSE_PUBLIC_URL, else derived
+	// from the dashboard domain.
+	c.PublicURL = strings.TrimRight(env("PULSE_PUBLIC_URL", ""), "/")
+	if c.PublicURL == "" {
+		if d := env("DASHBOARD_DOMAIN", ""); d != "" {
+			c.PublicURL = "https://" + d
+		}
+	}
+
+	// Configure OIDC providers when their client credentials are present.
+	if id := env("GOOGLE_CLIENT_ID", ""); id != "" {
+		c.OIDC = append(c.OIDC, OIDCProvider{
+			Name: "google", Display: "Google",
+			Issuer:       "https://accounts.google.com",
+			ClientID:     id,
+			ClientSecret: env("GOOGLE_CLIENT_SECRET", ""),
+			Scopes:       []string{"openid", "email", "profile"},
+		})
+	}
+	if id := env("TELEGRAM_CLIENT_ID", ""); id != "" {
+		c.OIDC = append(c.OIDC, OIDCProvider{
+			Name: "telegram", Display: "Telegram",
+			Issuer:       env("TELEGRAM_ISSUER", "https://oauth.telegram.org"),
+			ClientID:     id,
+			ClientSecret: env("TELEGRAM_CLIENT_SECRET", ""),
+			Scopes:       splitCSV(env("TELEGRAM_SCOPES", "openid")),
+		})
+	}
 	return c
+}
+
+// OIDCProviderByName returns a configured provider by its url slug.
+func (c *Config) OIDCProviderByName(name string) (OIDCProvider, bool) {
+	for _, p := range c.OIDC {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return OIDCProvider{}, false
 }
 
 // SessionTTL is how long a web session lasts.

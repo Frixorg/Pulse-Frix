@@ -38,29 +38,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The cookie carries a random secret; the store keys on its hash so a DB
-	// leak does not reveal usable session tokens.
-	cookieValue, _, err := auth.GenerateToken("pss")
-	if err != nil {
+	if err := s.issueSession(w, mem.OrgID, user.ID); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not create session")
 		return
 	}
-	sess := newSession(mem.OrgID, user.ID, s.cfg.SessionTTL())
-	sess.ID = auth.HashToken(cookieValue)
-	if err := s.store.CreateSession(sess); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not persist session")
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookie,
-		Value:    cookieValue,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cfg.Env == "production",
-		SameSite: http.SameSiteLaxMode,
-		Expires:  sess.ExpiresAt,
-	})
 	s.audit.Record(mem.OrgID, user.Email, "auth.login", "success", clientIP(r), nil)
 	JSON(w, http.StatusOK, sessionPayload(user.Email, mem.Role))
 }

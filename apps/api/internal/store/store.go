@@ -28,6 +28,10 @@ type Store interface {
 	SeedOrgOwner(orgName, email, passwordHash string) (*model.Organization, *model.User, error)
 	GetUser(orgID, userID string) (*model.User, error)
 
+	// UpsertOIDCUser finds the user for (provider, subject) or, on first login,
+	// creates a new tenant (org + owner user). Email may be empty.
+	UpsertOIDCUser(provider, subject, email, name string) (*model.User, *model.Membership, error)
+
 	CreateSession(s *model.Session) error
 	GetSession(id string) (*model.Session, error)
 	DeleteSession(id string) error

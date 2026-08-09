@@ -11,6 +11,7 @@ import (
 	"github.com/frix-me/pulse/api/internal/auth"
 	"github.com/frix-me/pulse/api/internal/config"
 	"github.com/frix-me/pulse/api/internal/metricsproxy"
+	"github.com/frix-me/pulse/api/internal/oidc"
 	"github.com/frix-me/pulse/api/internal/rbac"
 	"github.com/frix-me/pulse/api/internal/store"
 )
@@ -22,6 +23,7 @@ type Server struct {
 	logger  *slog.Logger
 	audit   *audit.Recorder
 	metrics *metricsproxy.Client
+	oidc    *oidc.Manager
 
 	loginLimiter  *Limiter
 	enrollLimiter *Limiter
@@ -33,12 +35,27 @@ type Server struct {
 
 // New constructs a Server.
 func New(cfg *config.Config, st store.Store, logger *slog.Logger) *Server {
+	// Build OIDC providers (Google, Telegram, ...) with per-provider redirect URIs.
+	var provs []oidc.ProviderConfig
+	for _, p := range cfg.OIDC {
+		provs = append(provs, oidc.ProviderConfig{
+			Name:         p.Name,
+			Display:      p.Display,
+			Issuer:       p.Issuer,
+			ClientID:     p.ClientID,
+			ClientSecret: p.ClientSecret,
+			Scopes:       p.Scopes,
+			RedirectURI:  cfg.PublicURL + "/api/v1/auth/" + p.Name + "/callback",
+		})
+	}
+
 	return &Server{
 		cfg:           cfg,
 		store:         st,
 		logger:        logger,
 		audit:         audit.New(st, logger),
 		metrics:       metricsproxy.New(cfg.MetricsURL),
+		oidc:          oidc.NewManager(provs),
 		loginLimiter:  NewLimiter(0.2, 5),  // ~5 attempts then 1 / 5s
 		enrollLimiter: NewLimiter(0.1, 3),  // strict on enrollment
 		ingestLimiter: NewLimiter(50, 100), // agent ingestion (per IP)
@@ -57,6 +74,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/auth/login", s.loginLimiter.Middleware()(http.HandlerFunc(s.handleLogin)))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/session", s.handleSession)
+
+	// OIDC (Google, Telegram, ...) — public browser redirects.
+	mux.HandleFunc("GET /api/v1/auth/providers", s.handleAuthProviders)
+	mux.HandleFunc("GET /api/v1/auth/{provider}/start", s.handleOIDCStart)
+	mux.HandleFunc("GET /api/v1/auth/{provider}/callback", s.handleOIDCCallback)
 
 	// Servers
 	mux.HandleFunc("GET /api/v1/servers", s.requirePerm(rbac.ServerRead, s.handleListServers))

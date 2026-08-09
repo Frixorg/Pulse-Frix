@@ -13,6 +13,11 @@ const password = ref("");
 const error = ref("");
 const busy = ref(false);
 
+// Surface OIDC redirect errors (e.g. /login?error=oidc_failed).
+if (route.query.error) {
+  error.value = "Sign-in failed: " + String(route.query.error).replace(/_/g, " ");
+}
+
 async function submit() {
   error.value = "";
   busy.value = true;

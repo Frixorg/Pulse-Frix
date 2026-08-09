@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -77,6 +78,70 @@ func (p *Postgres) SeedOrgOwner(orgName, email, passwordHash string) (*model.Org
 		return nil, nil, err
 	}
 	return org, u, tx.Commit()
+}
+
+func (p *Postgres) UpsertOIDCUser(provider, subject, email, name string) (*model.User, *model.Membership, error) {
+	// Existing OIDC identity.
+	var uid string
+	err := p.db.QueryRow(`SELECT user_id FROM oidc_identities WHERE provider=$1 AND subject=$2`, provider, subject).Scan(&uid)
+	if err == nil {
+		return p.userWithMembership(uid)
+	}
+	// Existing account by email → link identity.
+	if email != "" {
+		if e := p.db.QueryRow(`SELECT id FROM users WHERE email=$1`, strings.ToLower(email)).Scan(&uid); e == nil {
+			_, _ = p.db.Exec(`INSERT INTO oidc_identities(provider,subject,user_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, provider, subject, uid)
+			return p.userWithMembership(uid)
+		}
+	}
+	// New tenant.
+	tx, err := p.db.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	orgName := name
+	if orgName == "" {
+		orgName = email
+	}
+	if orgName == "" {
+		orgName = "Personal"
+	}
+	org := &model.Organization{ID: auth.NewID("org"), Name: orgName, CreatedAt: time.Now().UTC()}
+	if _, err := tx.Exec(`INSERT INTO organizations(id,name,created_at) VALUES($1,$2,$3)`, org.ID, org.Name, org.CreatedAt); err != nil {
+		return nil, nil, err
+	}
+	u := &model.User{ID: auth.NewID("usr"), Email: strings.ToLower(email), Name: name, CreatedAt: time.Now().UTC()}
+	if _, err := tx.Exec(`INSERT INTO users(id,email,name,password_hash,created_at) VALUES($1,NULLIF($2,''),$3,'',$4)`, u.ID, u.Email, u.Name, u.CreatedAt); err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.Exec(`INSERT INTO memberships(org_id,user_id,role) VALUES($1,$2,'owner')`, org.ID, u.ID); err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.Exec(`INSERT INTO oidc_identities(provider,subject,user_id) VALUES($1,$2,$3)`, provider, subject, u.ID); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return u, &model.Membership{OrgID: org.ID, UserID: u.ID, Role: model.RoleOwner}, nil
+}
+
+// userWithMembership loads a user + its (first) membership by user id.
+func (p *Postgres) userWithMembership(userID string) (*model.User, *model.Membership, error) {
+	u := &model.User{}
+	var email sql.NullString
+	if err := p.db.QueryRow(`SELECT id,COALESCE(email,''),COALESCE(name,''),created_at FROM users WHERE id=$1`, userID).
+		Scan(&u.ID, &email, &u.Name, &u.CreatedAt); err != nil {
+		return nil, nil, err
+	}
+	u.Email = email.String
+	m := &model.Membership{}
+	if err := p.db.QueryRow(`SELECT org_id,user_id,role FROM memberships WHERE user_id=$1 LIMIT 1`, userID).
+		Scan(&m.OrgID, &m.UserID, &m.Role); err != nil {
+		return nil, nil, err
+	}
+	return u, m, nil
 }
 
 func (p *Postgres) GetUser(orgID, userID string) (*model.User, error) {

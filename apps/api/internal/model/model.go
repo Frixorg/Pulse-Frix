@@ -36,9 +36,11 @@ type Organization struct {
 }
 
 // User is an account. PasswordHash and MFASecret are never serialised to JSON.
+// Email may be empty for identity-provider logins that don't share one.
 type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
+	Name         string    `json:"name,omitempty"`
 	PasswordHash string    `json:"-"`
 	MFASecret    string    `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`

@@ -35,6 +35,31 @@ func sessionPayload(email string, role model.Role) map[string]any {
 	}
 }
 
+// issueSession creates a session and sets the session cookie. Shared by
+// password login and OIDC callbacks. The cookie carries a random secret; the
+// store keys on its hash.
+func (s *Server) issueSession(w http.ResponseWriter, orgID, userID string) error {
+	cookieValue, _, err := auth.GenerateToken("pss")
+	if err != nil {
+		return err
+	}
+	sess := newSession(orgID, userID, s.cfg.SessionTTL())
+	sess.ID = auth.HashToken(cookieValue)
+	if err := s.store.CreateSession(sess); err != nil {
+		return err
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    cookieValue,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.cfg.Env == "production",
+		SameSite: http.SameSiteLaxMode,
+		Expires:  sess.ExpiresAt,
+	})
+	return nil
+}
+
 // decodeJSON reads a size-limited JSON body, rejecting unknown fields.
 func decodeJSON(r *http.Request, v any, maxBytes int64) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxBytes))

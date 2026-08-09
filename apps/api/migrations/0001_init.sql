@@ -15,10 +15,20 @@ CREATE TABLE IF NOT EXISTS organizations (
 
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
-    email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    email         TEXT UNIQUE,              -- nullable: some OIDC logins share no email
+    name          TEXT,
+    password_hash TEXT NOT NULL DEFAULT '',
     mfa_secret    TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Federated identities (Google, Telegram, ...) linked to a user.
+CREATE TABLE IF NOT EXISTS oidc_identities (
+    provider   TEXT NOT NULL,
+    subject    TEXT NOT NULL,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider, subject)
 );
 
 CREATE TABLE IF NOT EXISTS memberships (

@@ -156,11 +156,12 @@ func (p *Postgres) GetMembership(orgID, userID string) (*model.Membership, error
 
 func (p *Postgres) GetUser(orgID, userID string) (*model.User, error) {
 	u := &model.User{}
+	// COALESCE guards against NULL email/name for identity-provider users.
 	err := p.db.QueryRow(`
-		SELECT u.id,u.email,u.password_hash,u.created_at
+		SELECT u.id,COALESCE(u.email,''),COALESCE(u.name,''),u.password_hash,u.created_at
 		FROM users u JOIN memberships m ON m.user_id=u.id
 		WHERE u.id=$1 AND m.org_id=$2`, userID, orgID).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt)
+		Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

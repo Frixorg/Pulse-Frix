@@ -153,6 +153,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_org_ts ON audit_log(org_id, ts DESC);
 
+-- Self-healing: bring an older/partial `users` table up to date so identity
+-- (Google/Telegram) logins work. Safe to re-run on any schema version.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE users ALTER COLUMN password_hash SET DEFAULT '';
+
 COMMIT;
 
 -- ---------------------------------------------------------------------------

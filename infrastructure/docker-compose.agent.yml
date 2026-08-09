@@ -1,15 +1,14 @@
 # =============================================================================
-# Cloud-mode footprint: just the agent (+ local exporters), shipping OUTBOUND to
-# Pulse Cloud. No dashboard, API or database run locally in cloud mode — the
-# dashboard lives at pulse.frix.me. No inbound port is opened. See
-# docs/CLOUD_MODE.md.
+# Cloud-mode footprint for a MONITORED VPS: just the agent, shipping OUTBOUND to
+# Pulse Cloud. No dashboard, API, database or exporters run here — the agent
+# collects host + Docker metrics itself and sends them. No inbound port is
+# opened. See docs/CLOUD_MODE.md.
+#
+# NOTE: do not run this on the host that IS the Pulse cloud control plane; that
+# host monitors itself via the `--profile agent` service in
+# docker-compose.cloud.yml instead.
 # =============================================================================
 name: pulse
-
-networks:
-  pulse-net:
-    name: pulse-net
-    driver: bridge
 
 volumes:
   pulse-agent-data:
@@ -20,6 +19,10 @@ services:
       context: ../agent
     container_name: pulse-agent
     restart: unless-stopped
+    # Host network + pid = accurate discovery (ports, processes) and a clean
+    # outbound path to the cloud. Docker socket is READ-ONLY.
+    network_mode: host
+    pid: host
     environment:
       PULSE_MODE: cloud
       PULSE_API_URL: ${PULSE_API_URL:-https://pulse.frix.me}
@@ -28,16 +31,4 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - pulse-agent-data:/data
-    networks: [pulse-net]
-    mem_limit: 128m
-
-  pulse-node-exporter:
-    image: prom/node-exporter:v1.8.2
-    container_name: pulse-node-exporter
-    restart: unless-stopped
-    command: ["--path.rootfs=/host"]
-    pid: host
-    volumes:
-      - /:/host:ro,rslave
-    networks: [pulse-net]
     mem_limit: 128m

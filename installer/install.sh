@@ -143,6 +143,15 @@ precheck() {
   if [ "$MODE" = "cloud" ] && [ -z "$ENROLL_TOKEN" ]; then
     die "cloud mode requires --enrollment-token (generate one in the dashboard)"
   fi
+  # Refuse to run on the host that IS the Pulse cloud control plane — the
+  # installer is for OTHER VPSs, and here it would collide with the running
+  # stack (pulse-net, pulse-agent, pulse-node-exporter).
+  if have docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "pulse-api"; then
+    die "This host already runs the Pulse cloud stack (pulse-api).
+    The installer is for OTHER servers. To monitor THIS host, enrol its own agent:
+      docker compose -f infrastructure/docker-compose.cloud.yml --env-file .env --profile agent up -d pulse-agent
+    (set AGENT_ENROLLMENT_TOKEN in that .env first)."
+  fi
   ok "Prechecks passed"
 }
 

@@ -22,7 +22,8 @@ function cloneCmd() {
 }
 function installCmd() {
   const key = token.value || "<your-key>";
-  return `sudo PULSE_API_URL=${apiUrl} ./installer/install.sh --mode cloud --enrollment-token ${key}`;
+  // Invoke via `bash` so it works even if the cloned file isn't marked +x.
+  return `sudo PULSE_API_URL=${apiUrl} bash installer/install.sh --mode cloud --enrollment-token ${key}`;
 }
 
 async function generate() {

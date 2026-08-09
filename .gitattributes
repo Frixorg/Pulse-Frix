@@ -1,0 +1,19 @@
+# Force LF line endings for shell scripts and other text so that repos cloned or
+# checked out on Windows don't corrupt scripts with CRLF (which breaks bash and
+# causes "command not found" on the shebang).
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.bash text eol=lf
+Makefile text eol=lf
+*.go   text eol=lf
+*.ts   text eol=lf
+*.vue  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Binaries (leave untouched)
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary

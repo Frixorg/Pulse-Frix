@@ -3,6 +3,7 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/frix-me/pulse/api/internal/metricsproxy"
@@ -67,21 +68,8 @@ func buildPromQL(metric, instance string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	// Templates use %s once or twice; sprintf-style without importing fmt here.
-	return fillTemplate(tmpl, instance), true
-}
-
-func fillTemplate(tmpl, val string) string {
-	out := ""
-	for i := 0; i < len(tmpl); i++ {
-		if i+1 < len(tmpl) && tmpl[i] == '%' && tmpl[i+1] == 's' {
-			out += val
-			i++
-			continue
-		}
-		out += string(tmpl[i])
-	}
-	return out
+	// Substitute the instance label into every %s placeholder.
+	return strings.ReplaceAll(tmpl, "%s", instance), true
 }
 
 func (s *Server) latestSampleSeries(orgID, serverID, metric string) []metricsproxy.Series {

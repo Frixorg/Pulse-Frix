@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"net/http"
+	"strings"
 )
 
 // domainView is the shape returned for /servers/{id}/domains.
@@ -124,20 +125,7 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 }
 
 func splitServerNames(s string) []string {
-	var out []string
-	cur := ""
-	for _, c := range s {
-		if c == ' ' || c == ',' || c == '\t' {
-			if cur != "" {
-				out = append(out, cur)
-				cur = ""
-			}
-			continue
-		}
-		cur += string(c)
-	}
-	if cur != "" {
-		out = append(out, cur)
-	}
-	return out
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == ' ' || r == ',' || r == '\t'
+	})
 }

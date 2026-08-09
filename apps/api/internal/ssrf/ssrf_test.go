@@ -14,6 +14,8 @@ func TestIPAllowedBlocksInternal(t *testing.T) {
 		"0.0.0.0",
 		"fc00::1", "fe80::1",
 		"100.64.0.1",
+		"::ffff:127.0.0.1",     // IPv4-mapped loopback must still be blocked
+		"::ffff:169.254.169.254", // IPv4-mapped metadata must still be blocked
 	}
 	for _, s := range blocked {
 		ip := net.ParseIP(s)
@@ -24,7 +26,11 @@ func TestIPAllowedBlocksInternal(t *testing.T) {
 }
 
 func TestIPAllowedPermitsPublic(t *testing.T) {
-	allowed := []string{"8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"}
+	allowed := []string{
+		"8.8.8.8", "1.1.1.1", "93.184.216.34",
+		"2606:2800:220:1:248:1893:25c8:1946",
+		"::ffff:8.8.8.8", // IPv4-mapped public address must be allowed
+	}
 	for _, s := range allowed {
 		ip := net.ParseIP(s)
 		if !IPAllowed(ip) {

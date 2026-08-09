@@ -79,8 +79,11 @@ func IPAllowed(ip net.IP) bool {
 	if ip.IsPrivate() { // RFC1918 + IPv6 ULA (fc00::/7)
 		return false
 	}
-	// Explicit extras: cloud metadata, carrier-grade NAT, Docker bridge ranges,
-	// and IPv4-mapped IPv6.
+	// Explicit extras: cloud metadata, carrier-grade NAT, Docker bridge ranges.
+	// NOTE: IPv4-mapped IPv6 (::ffff:a.b.c.d) is handled by the checks above and
+	// by these v4 CIDRs, because Go's net.IP methods and IPNet.Contains normalise
+	// via To4(). Do NOT add ::ffff:0:0/96 here — its mask degenerates to /0 in
+	// 4-byte space and would block ALL IPv4 addresses.
 	for _, cidr := range extraBlocked {
 		if cidr.Contains(ip) {
 			return false
@@ -102,7 +105,6 @@ var extraBlocked = mustCIDRs(
 	"192.0.2.0/24",   // TEST-NET-1
 	"198.18.0.0/15",  // benchmarking
 	"172.17.0.0/16",  // default docker bridge
-	"::ffff:0:0/96",  // IPv4-mapped IPv6
 	"fc00::/7",       // IPv6 ULA (also covered by IsPrivate, belt and braces)
 )
 

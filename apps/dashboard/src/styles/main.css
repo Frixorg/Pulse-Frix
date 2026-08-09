@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import "./tokens.css";
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--pulse-bg);
+  color: var(--pulse-text);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-card p-4;
+  }
+  .card-title {
+    @apply text-xs font-semibold uppercase tracking-wide text-muted mb-2;
+  }
+  .metric-value {
+    @apply text-2xl font-semibold text-text;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply bg-accent text-white hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply text-muted hover:text-text hover:bg-surface-2;
+  }
+  .nav-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted hover:text-text hover:bg-surface-2 transition-colors;
+  }
+  .nav-link-active {
+    @apply text-text bg-surface-2;
+  }
+  .table {
+    @apply w-full text-sm text-left;
+  }
+  .table th {
+    @apply text-xs uppercase tracking-wide text-muted font-semibold py-2 px-3 border-b border-border;
+  }
+  .table td {
+    @apply py-2 px-3 border-b border-border/60;
+  }
+}
+
+/* Thin, unobtrusive scrollbars for a technical feel. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--pulse-border);
+  border-radius: 6px;
+}

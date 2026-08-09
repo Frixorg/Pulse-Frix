@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulse.frix.me/schemas/protocol/1.0",
+  "title": "Pulse agent protocol",
+  "type": "object",
+  "definitions": {
+    "envelope": {
+      "type": "object",
+      "required": ["type", "agent_id", "protocol", "timestamp", "body"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["enroll", "hello", "heartbeat", "discovery", "metrics", "health"]
+        },
+        "agent_id": { "type": "string" },
+        "protocol": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "body": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "enroll": {
+      "type": "object",
+      "required": ["enrollment_token", "installation_id", "public_key", "protocol_version"],
+      "properties": {
+        "enrollment_token": { "type": "string" },
+        "installation_id": { "type": "string" },
+        "public_key": { "type": "string" },
+        "protocol_version": { "type": "string" },
+        "fingerprint": {
+          "type": "object",
+          "properties": {
+            "os": { "type": "string" },
+            "arch": { "type": "string" },
+            "boot_id": { "type": "string" }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["timestamp"],
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "cpu_percent": { "type": "number" },
+        "load1": { "type": "number" },
+        "mem_total_bytes": { "type": "integer" },
+        "mem_used_bytes": { "type": "integer" },
+        "net_rx_bytes": { "type": "integer" },
+        "net_tx_bytes": { "type": "integer" }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": ["type", "id", "name", "detected_by"],
+      "properties": {
+        "type": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string" },
+        "health": { "type": "string", "enum": ["HEALTHY", "DEGRADED", "DOWN", "UNKNOWN"] },
+        "labels": { "type": "object" },
+        "attributes": { "type": "object" },
+        "detected_by": { "type": "string" }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "required": ["generated_at", "resources"],
+      "properties": {
+        "installation_id": { "type": "string" },
+        "server_id": { "type": "string" },
+        "hostname": { "type": "string" },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "resources": { "type": "array", "items": { "$ref": "#/definitions/resource" } }
+      }
+    }
+  }
+}

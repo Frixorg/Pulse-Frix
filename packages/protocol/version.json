@@ -1,0 +1,15 @@
+{
+  "protocol_version": "1.0",
+  "supported_range": {
+    "min": "1.0",
+    "max": "1.0"
+  },
+  "capabilities": [
+    "READ_DOCKER",
+    "READ_SYSTEM",
+    "READ_NETWORK",
+    "READ_NGINX",
+    "READ_METRICS"
+  ],
+  "notes": "Write capabilities are intentionally absent in v1. Any future write capability must be disabled by default, explicitly authorized, scoped, audited and revocable, and must never include arbitrary shell execution."
+}

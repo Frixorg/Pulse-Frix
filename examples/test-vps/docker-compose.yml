@@ -1,0 +1,44 @@
+# A realistic "existing VPS" environment used to validate that Pulse discovers
+# and monitors WITHOUT touching anything. Bring this up, then run the installer
+# with PULSE_FULL_TEST semantics and confirm zero changes to these resources.
+# (These are the user's pretend workloads — Pulse must never modify them.)
+name: demo-existing
+
+networks:
+  demo-frontend:
+  demo-backend:
+
+volumes:
+  demo-pgdata:
+
+services:
+  demo-nginx:
+    image: nginx:alpine
+    container_name: demo-nginx
+    ports: ["8081:80"]
+    networks: [demo-frontend]
+
+  demo-api:
+    image: node:20-alpine
+    container_name: demo-api
+    command: ["node", "-e", "require('http').createServer((_,res)=>res.end('ok')).listen(3001)"]
+    networks: [demo-frontend, demo-backend]
+
+  demo-postgres:
+    image: postgres:16-alpine
+    container_name: demo-postgres
+    environment:
+      POSTGRES_PASSWORD: demo
+    volumes: [demo-pgdata:/var/lib/postgresql/data]
+    networks: [demo-backend]
+
+  demo-redis:
+    image: redis:7-alpine
+    container_name: demo-redis
+    networks: [demo-backend]
+
+  demo-python:
+    image: python:3.12-alpine
+    container_name: demo-python
+    command: ["python", "-m", "http.server", "8000"]
+    networks: [demo-backend]

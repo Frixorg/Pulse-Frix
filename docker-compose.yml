@@ -1,0 +1,141 @@
+# =============================================================================
+# Pulse self-hosted stack. Everything runs on the ISOLATED `pulse-net` network
+# under a `pulse-*` namespace. This compose never touches the user's existing
+# containers, networks, or Nginx. See docs/SAFETY_MODEL.md.
+#
+# Bring up:   ./installer/install.sh          (recommended — Discover→Plan→Apply)
+# or:         docker compose --env-file /opt/pulse/.env -p pulse up -d
+#
+# Persistence: the API defaults to an in-memory store. For durable storage build
+# the API with the pgx tag by setting API_TAGS=pgx (uses the pulse-postgres
+# service + apps/api/migrations).
+# =============================================================================
+name: pulse
+
+networks:
+  pulse-net:
+    name: pulse-net
+    driver: bridge
+
+volumes:
+  pulse-postgres-data:
+  pulse-prometheus-data:
+  pulse-grafana-data:
+  pulse-agent-data:
+
+services:
+  pulse-postgres:
+    image: postgres:16-alpine
+    container_name: pulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pulse}
+      POSTGRES_DB: pulse
+    volumes:
+      - pulse-postgres-data:/var/lib/postgresql/data
+    networks: [pulse-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+
+  pulse-api:
+    build:
+      context: ./apps/api
+      args:
+        TAGS: ${API_TAGS:-}
+    container_name: pulse-api
+    restart: unless-stopped
+    environment:
+      PULSE_API_ADDR: ":8080"
+      PULSE_MODE: ${PULSE_MODE:-local}
+      PULSE_ENV: ${PULSE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL:-}
+      METRICS_URL: http://pulse-prometheus:9090
+      PULSE_SESSION_SECRET: ${PULSE_SESSION_SECRET:-}
+      PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:-}
+      PULSE_CORS_ORIGINS: ${PULSE_CORS_ORIGINS:-}
+      PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
+      PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
+      PULSE_BOOTSTRAP_ENROLLMENT_TOKEN: ${PULSE_BOOTSTRAP_ENROLLMENT_TOKEN:-}
+    depends_on:
+      pulse-postgres:
+        condition: service_healthy
+    networks: [pulse-net]
+    mem_limit: 256m
+
+  pulse-dashboard:
+    build:
+      context: ./apps/dashboard
+    container_name: pulse-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-3210}:80"
+    depends_on: [pulse-api]
+    networks: [pulse-net]
+    mem_limit: 128m
+
+  pulse-agent:
+    build:
+      context: ./agent
+    container_name: pulse-agent
+    restart: unless-stopped
+    environment:
+      # The agent always uses the secure enroll+ingest path (cloud protocol),
+      # pointed at the local API for self-hosted deployments.
+      PULSE_MODE: cloud
+      PULSE_API_URL: http://pulse-api:8080
+      PULSE_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-}
+      PULSE_DATA_DIR: /data
+    volumes:
+      # READ-ONLY Docker socket for container discovery (root-equivalent — see
+      # SECURITY.md). Prefer a read-only socket proxy in hardened deployments.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - pulse-agent-data:/data
+    depends_on: [pulse-api]
+    networks: [pulse-net]
+    mem_limit: 128m
+
+  pulse-prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: pulse-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=${METRICS_RETENTION:-7d}
+      - --storage.tsdb.retention.size=${METRICS_MAX_DISK:-2GB}
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - pulse-prometheus-data:/prometheus
+    networks: [pulse-net]
+    mem_limit: ${MONITORING_MEMORY_LIMIT:-512m}
+
+  pulse-node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: pulse-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    networks: [pulse-net]
+    mem_limit: 128m
+
+  pulse-cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: pulse-cadvisor
+    restart: unless-stopped
+    privileged: false
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [pulse-net]
+    mem_limit: 256m

@@ -1,0 +1,81 @@
+// Typed API client. Uses cookie-based sessions (credentials: "include"). Never
+// stores tokens in localStorage. Surfaces structured API errors.
+
+import type {
+  Server,
+  ServerSummary,
+  SessionInfo,
+  Resource,
+  DomainView,
+  SecurityFinding,
+  AlertInstance,
+  EventItem,
+  MetricsResponse,
+  Topology,
+  DetectorResult,
+  Page,
+} from "./types";
+
+export class ApiError extends Error {
+  code: string;
+  requestId: string;
+  status: number;
+  constructor(status: number, code: string, message: string, requestId = "") {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(`/api/v1${path}`, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const text = await resp.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!resp.ok) {
+    const e = body?.error ?? {};
+    throw new ApiError(resp.status, e.code ?? "INTERNAL_ERROR", e.message ?? resp.statusText, e.request_id);
+  }
+  return body as T;
+}
+
+export const api = {
+  // auth
+  login: (email: string, password: string) =>
+    request<SessionInfo>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  logout: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
+  session: () => request<SessionInfo>("/auth/session"),
+
+  // servers
+  servers: () => request<Page<Server>>("/servers"),
+  server: (id: string) => request<Server>(`/servers/${id}`),
+  summary: (id: string) => request<ServerSummary>(`/servers/${id}/summary`),
+
+  // discovery-derived
+  discovery: (id: string) =>
+    request<{ resources: Resource[]; detectors: DetectorResult[]; topology?: Topology }>(`/servers/${id}/discovery`),
+  containers: (id: string) => request<Page<Resource>>(`/servers/${id}/containers`),
+  services: (id: string) => request<Page<Resource>>(`/servers/${id}/services`),
+  databases: (id: string) => request<Page<Resource>>(`/servers/${id}/databases`),
+  applications: (id: string) => request<Page<Resource>>(`/servers/${id}/applications`),
+  domains: (id: string) => request<Page<DomainView>>(`/servers/${id}/domains`),
+  security: (id: string) => request<Page<SecurityFinding>>(`/servers/${id}/security`),
+  topology: (id: string) => request<Topology>(`/servers/${id}/topology`),
+  metrics: (id: string, query: string, range: string) =>
+    request<MetricsResponse>(`/servers/${id}/metrics?query=${encodeURIComponent(query)}&range=${range}`),
+
+  // alerts / events
+  alertInstances: () => request<Page<AlertInstance>>("/alerts/instances"),
+  events: (limit = 50) => request<Page<EventItem>>(`/events?limit=${limit}`),
+
+  // enrollment (cloud)
+  createEnrollmentToken: () =>
+    request<{ enrollment_token: string; expires_at: string }>("/agents/enrollment-tokens", { method: "POST" }),
+};

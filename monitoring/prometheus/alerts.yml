@@ -1,0 +1,56 @@
+# Pulse alert rules. Severities: info | warning | critical. The alert engine in
+# the API layers debounce/cooldown/grouping/dedup/correlation on top of these
+# (docs/MONITORING.md#alerting). Thresholds mirror spec section 20.
+groups:
+  - name: pulse-system
+    rules:
+      - alert: HighCPU
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU > 90% for 10m on {{ $labels.instance }}"
+
+      - alert: HighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "RAM > 90% for 5m on {{ $labels.instance }}"
+
+      - alert: DiskFillingUp
+        expr: 100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100) > 85
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Disk > 85% on {{ $labels.instance }}"
+
+      - alert: DiskCritical
+        expr: 100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100) > 95
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Disk > 95% on {{ $labels.instance }} — root cause candidate"
+
+      - alert: InodeExhaustion
+        expr: node_filesystem_files_free{mountpoint="/"} / node_filesystem_files{mountpoint="/"} * 100 < 5
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Filesystem inodes nearly exhausted on {{ $labels.instance }}"
+
+  - name: pulse-targets
+    rules:
+      - alert: ServerUnreachable
+        expr: up{job="node"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Server unreachable (node exporter down) on {{ $labels.instance }}"
+
+      - alert: ContainerRestarting
+        expr: increase(container_start_time_seconds[15m]) > 3
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: "Container restarting repeatedly: {{ $labels.name }}"

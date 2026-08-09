@@ -1,0 +1,49 @@
+# ---- Secrets & local config ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+!**/testdata/**/*.crt
+secrets/
+*.enrollment-token
+
+# ---- Go ----
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+vendor/
+
+# ---- Node / Vue / Vite ----
+node_modules/
+.pnpm-store/
+apps/dashboard/dist/
+apps/dashboard/.vite/
+*.local
+
+# ---- Build / release artifacts ----
+/build/
+/release/
+*.sbom.json
+checksums.txt
+*.sig
+
+# ---- Runtime / data ----
+/data/
+/state/
+/backups/
+/logs/
+*.log
+pulse-manifest.json
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

@@ -1,0 +1,10 @@
+{
+  "name": "@pulse/types",
+  "version": "0.1.0",
+  "description": "Shared TypeScript types for the Pulse API and dashboard.",
+  "license": "GPL-3.0",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}

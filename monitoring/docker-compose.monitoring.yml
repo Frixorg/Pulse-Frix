@@ -1,0 +1,72 @@
+# Standalone monitoring stack (Prometheus + exporters + Alertmanager + Grafana),
+# isolated on pulse-net. Useful for local development of the monitoring layer:
+#
+#   docker compose -f monitoring/docker-compose.monitoring.yml up -d
+#
+# In a full Pulse install these run as part of the root docker-compose.yml.
+name: pulse-monitoring
+
+networks:
+  pulse-net:
+    name: pulse-net
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: pulse-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    networks: [pulse-net]
+    mem_limit: 512m
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: pulse-alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks: [pulse-net]
+    mem_limit: 128m
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: pulse-node-exporter
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    networks: [pulse-net]
+    mem_limit: 128m
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: pulse-cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [pulse-net]
+    mem_limit: 256m
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: pulse-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    networks: [pulse-net]
+    mem_limit: 256m

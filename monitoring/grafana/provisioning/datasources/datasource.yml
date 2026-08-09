@@ -1,0 +1,10 @@
+# Grafana is an INTERNAL implementation component (docs/MONITORING.md#abstraction).
+# Users never need it; the Pulse dashboard abstracts metrics via the API.
+apiVersion: 1
+datasources:
+  - name: Pulse Prometheus
+    type: prometheus
+    access: proxy
+    url: http://pulse-prometheus:9090
+    isDefault: true
+    editable: false

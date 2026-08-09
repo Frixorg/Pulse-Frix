@@ -1,0 +1,38 @@
+/* Pulse design tokens. A dark, technical, information-dense theme. Status
+   colors: healthy (green), degraded (amber), down (red), unknown (grey).
+   See docs/UI_IA.md#design-tokens. */
+
+:root {
+  --pulse-bg: #0b0e14;
+  --pulse-surface: #121722;
+  --pulse-surface-2: #171d2b;
+  --pulse-border: #232b3a;
+  --pulse-text: #e6ebf2;
+  --pulse-text-muted: #8b95a7;
+  --pulse-accent: #4f8cff;
+
+  --pulse-healthy: #34d399;
+  --pulse-degraded: #fbbf24;
+  --pulse-down: #f87171;
+  --pulse-unknown: #6b7280;
+
+  --pulse-space-1: 4px;
+  --pulse-space-2: 8px;
+  --pulse-space-3: 12px;
+  --pulse-space-4: 16px;
+  --pulse-space-6: 24px;
+
+  --pulse-radius: 10px;
+  --pulse-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Optional light theme (desktop-first, dark default). */
+:root.light {
+  --pulse-bg: #f6f8fb;
+  --pulse-surface: #ffffff;
+  --pulse-surface-2: #f0f3f8;
+  --pulse-border: #dde3ec;
+  --pulse-text: #1a2130;
+  --pulse-text-muted: #5b6577;
+  --pulse-accent: #2563eb;
+}

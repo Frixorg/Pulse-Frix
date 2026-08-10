@@ -37,7 +37,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN}
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: pulse
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pulse}
       POSTGRES_DB: pulse
     volumes:
       - pulse-postgres-data:/var/lib/postgresql/data
@@ -78,8 +78,8 @@ services:
       PULSE_ENV: production
       DATABASE_URL: postgres://pulse:${POSTGRES_PASSWORD}@pulse-postgres:5432/pulse?sslmode=disable
       METRICS_URL: http://pulse-prometheus:9090
-      PULSE_SESSION_SECRET: ${PULSE_SESSION_SECRET:?set PULSE_SESSION_SECRET}
-      PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:?set PULSE_JWT_SIGNING_KEY}
+      PULSE_SESSION_SECRET: ${PULSE_SESSION_SECRET:-}
+      PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:-}
       PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
       PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
       # OIDC — used to build redirect URIs and configure providers.

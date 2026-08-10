@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -35,10 +36,16 @@ func NewPostgres(url string) (*Postgres, error) {
 	db.SetMaxOpenConns(20)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(time.Hour)
-	if err := db.Ping(); err != nil {
-		return nil, err
+	// Retry so a Postgres that is still starting doesn't crash-loop the API.
+	// A persistent failure (e.g. wrong password) still surfaces a clear error.
+	var lastErr error
+	for i := 0; i < 15; i++ {
+		if lastErr = db.Ping(); lastErr == nil {
+			return &Postgres{db: db}, nil
+		}
+		time.Sleep(2 * time.Second)
 	}
-	return &Postgres{db: db}, nil
+	return nil, fmt.Errorf("postgres unreachable after retries: %w", lastErr)
 }
 
 func (p *Postgres) FindLoginByEmail(email string) (*model.User, *model.Membership, error) {

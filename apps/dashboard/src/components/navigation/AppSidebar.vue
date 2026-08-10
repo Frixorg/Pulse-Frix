@@ -25,8 +25,6 @@ const nav: { name: string; label: string }[] = [
   { name: "infrastructure", label: "Infrastructure" },
   { name: "security", label: "Security" },
   { name: "integrations", label: "Integrations" },
-  // Servers sits at the bottom of the nav, just above Settings in the footer.
-  { name: "servers", label: "Servers" },
 ];
 
 // Until the first server connects, keep the nav focused on getting set up.
@@ -64,6 +62,14 @@ async function logout() {
     </nav>
 
     <div class="foot">
+      <RouterLink
+        v-if="servers.list.length"
+        :to="{ name: 'servers' }"
+        class="nav-link"
+        active-class="nav-link-active"
+      >
+        Servers
+      </RouterLink>
       <RouterLink :to="{ name: 'settings' }" class="nav-link" active-class="nav-link-active">
         Settings
       </RouterLink>

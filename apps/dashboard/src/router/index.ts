@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 const routes: RouteRecordRaw[] = [
   { path: "/", name: "landing", component: () => import("@/views/LandingView.vue"), meta: { public: true } },
   { path: "/login", name: "login", component: () => import("@/views/LoginView.vue"), meta: { public: true } },
+  { path: "/self-hosted", name: "self-hosted", component: () => import("@/views/SelfHostedView.vue"), meta: { public: true } },
   { path: "/welcome", name: "welcome", component: () => import("@/views/FirstRunView.vue"), meta: { public: true } },
   {
     path: "/app",

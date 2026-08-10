@@ -52,6 +52,7 @@ export const api = {
     request<SessionInfo>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
   session: () => request<SessionInfo>("/auth/session"),
+  authProviders: () => request<{ providers: { name: string; start: string }[] }>("/auth/providers"),
 
   // servers
   servers: () => request<Page<Server>>("/servers"),

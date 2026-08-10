@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useServersStore } from "@/stores/servers";
+import ServerSelect from "@/components/navigation/ServerSelect.vue";
 
 const servers = useServersStore();
 </script>
@@ -9,16 +10,7 @@ const servers = useServersStore();
     <div class="left">
       <template v-if="servers.list.length">
         <span class="sel-k">Server</span>
-        <select
-          class="sel"
-          :value="servers.selectedId ?? ''"
-          @change="servers.select(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="s in servers.list" :key="s.id" :value="s.id">
-            {{ s.hostname || s.server_id }}
-          </option>
-        </select>
-        <span class="count">{{ servers.list.length }} connected</span>
+        <ServerSelect />
       </template>
       <span v-else class="muted">No servers yet</span>
     </div>
@@ -27,6 +19,8 @@ const servers = useServersStore();
 
 <style scoped>
 .topbar {
+  position: relative;
+  z-index: 30; /* keep the server dropdown above the scrolling content */
   height: 60px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--pulse-border);
@@ -47,19 +41,6 @@ const servers = useServersStore();
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--pulse-text-muted);
-}
-.sel {
-  background: var(--pulse-solid-2);
-  border: 1px solid var(--pulse-border);
-  color: var(--pulse-text);
-  border-radius: 10px;
-  font-size: 13px;
-  padding: 6px 10px;
-  font-family: var(--pulse-font-mono);
-}
-.count {
-  font-size: 12px;
   color: var(--pulse-text-muted);
 }
 .muted {

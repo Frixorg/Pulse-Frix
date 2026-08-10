@@ -92,7 +92,7 @@ async function submit() {
               <rect x="3" y="14" width="18" height="6" rx="2" />
               <path d="M7 8h.01M7 17h.01" />
             </svg>
-            Self-hosted — run Pulse on your own VPS
+            Self-hosted
           </RouterLink>
         </template>
 
@@ -229,16 +229,16 @@ async function submit() {
   box-sizing: border-box;
   padding: 12px 16px;
   border-radius: 11px;
-  background: rgba(199, 245, 66, 0.1);
+  background: var(--pulse-accent);
   border: 1px solid rgba(199, 245, 66, 0.35);
-  color: var(--pulse-accent);
+  color: #fff;
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
   transition: background 0.15s, transform 0.12s;
 }
 .host-btn:hover {
-  background: rgba(199, 245, 66, 0.18);
+  background: rgba(var(--pulse-accent),0.9);
   transform: translateY(-1px);
 }
 .form {

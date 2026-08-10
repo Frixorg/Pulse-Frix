@@ -173,7 +173,7 @@ const features = [
         <div class="start-cta">
           <RouterLink v-if="isAuthed" to="/app" class="btn btn-lime">Open your dashboard →</RouterLink>
           <RouterLink v-else to="/login" class="btn btn-lime">Sign in to get your key</RouterLink>
-          <a href="https://github.com/frix-me/pulse" class="btn btn-glass">View on GitHub</a>
+          <a href="https://github.com/Frixorg/Pulse-Frix" class="btn btn-glass">View on GitHub</a>
         </div>
       </section>
     </main>

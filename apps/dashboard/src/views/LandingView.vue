@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed, onMounted } from "vue";
+import { useAuthStore } from "@/stores/auth";
+
+const auth = useAuthStore();
+const isAuthed = computed(() => auth.isAuthenticated);
+onMounted(() => {
+  if (!auth.checked) auth.fetchSession();
+});
 
 const copied = ref("");
 function copy(text: string, id: string) {
@@ -40,7 +47,8 @@ const features = [
           <a href="#modes">Modes</a>
           <a href="#start">Get started</a>
         </nav>
-        <RouterLink to="/login" class="btn btn-ghost-glass">Sign in</RouterLink>
+        <RouterLink v-if="isAuthed" to="/app" class="btn btn-lime">Dashboard</RouterLink>
+        <RouterLink v-else to="/login" class="btn btn-ghost-glass">Sign in</RouterLink>
       </div>
     </header>
 
@@ -59,8 +67,11 @@ const features = [
 
         <div class="cta-row">
           <a href="#start" class="btn btn-lime">Deploy on your VPS</a>
-          <a href="/api/v1/auth/google/start" class="btn btn-glass">Continue with Google</a>
-          <a href="/api/v1/auth/telegram/start" class="btn btn-glass">Continue with Telegram</a>
+          <RouterLink v-if="isAuthed" to="/app" class="btn btn-glass">Open dashboard →</RouterLink>
+          <template v-else>
+            <a href="/api/v1/auth/google/start" class="btn btn-glass">Continue with Google</a>
+            <a href="/api/v1/auth/telegram/start" class="btn btn-glass">Continue with Telegram</a>
+          </template>
         </div>
 
         <button class="cmd" :class="{ ok: copied === 'hero' }" @click="copy('curl -fsSL https://install.frix.me/install.sh | bash', 'hero')">
@@ -158,7 +169,8 @@ const features = [
           <div class="step"><span class="step-n">3</span><h3>Watch</h3><p>Discovery runs and your infrastructure appears — read-only, safe.</p></div>
         </div>
         <div class="start-cta">
-          <RouterLink to="/login" class="btn btn-lime">Sign in to get your key</RouterLink>
+          <RouterLink v-if="isAuthed" to="/app" class="btn btn-lime">Open your dashboard →</RouterLink>
+          <RouterLink v-else to="/login" class="btn btn-lime">Sign in to get your key</RouterLink>
           <a href="https://github.com/frix-me/pulse" class="btn btn-glass">View on GitHub</a>
         </div>
       </section>

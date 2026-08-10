@@ -104,6 +104,22 @@ func (d DockerDetector) Detect(ctx context.Context) ([]model.Resource, error) {
 			}
 		}
 
+		// Security posture (privileged flag, IPC mode, credential hygiene).
+		if di, err := c.inspect(ctx, ct.ID); err == nil {
+			attrs["privileged"] = di.HostConfig.Privileged
+			if di.HostConfig.IpcMode != "" {
+				attrs["ipc_mode"] = di.HostConfig.IpcMode
+			}
+			if weak, blank := scanEnvCreds(di.Config.Env); len(weak) > 0 || blank {
+				if len(weak) > 0 {
+					attrs["weak_credentials"] = weak
+				}
+				if blank {
+					attrs["blank_password"] = true
+				}
+			}
+		}
+
 		out = append(out, model.Resource{
 			Type:       "docker_container",
 			ID:         "container:" + shortID(ct.ID),
@@ -169,4 +185,33 @@ func dockerHealth(state, status string) model.Status {
 
 func round2(f float64) float64 {
 	return float64(int64(f*100+0.5)) / 100
+}
+
+// scanEnvCreds inspects a container's environment for password variables that
+// are blank or set to a well-known weak/default value. It returns the offending
+// variable NAMES only (never the values) plus whether any password is blank.
+func scanEnvCreds(env []string) (weak []string, blank bool) {
+	weakVals := map[string]bool{
+		"postgres": true, "root": true, "password": true, "admin": true, "changeme": true,
+		"secret": true, "123456": true, "toor": true, "mysql": true, "test": true,
+		"guest": true, "default": true, "pass": true, "12345678": true,
+	}
+	for _, e := range env {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok {
+			continue
+		}
+		ku := strings.ToUpper(k)
+		if !strings.Contains(ku, "PASSWORD") && !strings.Contains(ku, "PASSWD") && !strings.Contains(ku, "PWD") {
+			continue
+		}
+		if strings.TrimSpace(v) == "" {
+			blank = true
+			continue
+		}
+		if weakVals[strings.ToLower(strings.TrimSpace(v))] {
+			weak = append(weak, k)
+		}
+	}
+	return weak, blank
 }

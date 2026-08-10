@@ -56,6 +56,7 @@ func (s *Server) issueSession(w http.ResponseWriter, orgID, userID string) error
 		Secure:   s.cfg.Env == "production",
 		SameSite: http.SameSiteLaxMode,
 		Expires:  sess.ExpiresAt,
+		MaxAge:   int(s.cfg.SessionTTL().Seconds()),
 	})
 	return nil
 }

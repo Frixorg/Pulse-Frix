@@ -64,6 +64,16 @@ func (NginxDetector) Detect(context.Context) ([]model.Resource, error) {
 			if len(ups) > 0 {
 				attrs["upstreams"] = ups
 			}
+			// Security posture for the Security view.
+			if len(vh.Headers) > 0 {
+				attrs["headers"] = vh.Headers
+			}
+			attrs["has_hsts"] = hasHeader(vh.Headers, "Strict-Transport-Security")
+			attrs["has_xframe"] = hasHeader(vh.Headers, "X-Frame-Options")
+			attrs["has_csp"] = hasHeader(vh.Headers, "Content-Security-Policy")
+			attrs["has_xcto"] = hasHeader(vh.Headers, "X-Content-Type-Options")
+			attrs["has_rate_limit"] = vh.HasRateLimit
+			attrs["server_tokens_off"] = vh.ServerTokensOff
 			out = append(out, model.Resource{
 				Type:       "nginx_vhost",
 				ID:         "nginx:" + vh.ServerName,
@@ -94,11 +104,14 @@ func (NginxDetector) Health(context.Context) model.HealthReport {
 }
 
 type nginxVHost struct {
-	ServerName  string
-	Listen      []string
-	SSL         bool
-	Certificate string
-	Upstreams   []string
+	ServerName      string
+	Listen          []string
+	SSL             bool
+	Certificate     string
+	Upstreams       []string
+	Headers         []string // add_header directive names
+	HasRateLimit    bool     // limit_req present
+	ServerTokensOff bool     // server_tokens off
 }
 
 // parseNginxServers is a deliberately small, forgiving parser: it extracts
@@ -161,6 +174,18 @@ func parseNginxServers(content string) []nginxVHost {
 			if inServer && i+1 < len(tokens) {
 				cur.Upstreams = append(cur.Upstreams, cleanUpstream(tokens[i+1]))
 			}
+		case "add_header":
+			if inServer && i+1 < len(tokens) {
+				cur.Headers = append(cur.Headers, strings.TrimRight(tokens[i+1], ";"))
+			}
+		case "limit_req":
+			if inServer {
+				cur.HasRateLimit = true
+			}
+		case "server_tokens":
+			if inServer && i+1 < len(tokens) && strings.TrimRight(tokens[i+1], ";") == "off" {
+				cur.ServerTokensOff = true
+			}
 		}
 	}
 	flush()
@@ -206,4 +231,13 @@ func cleanUpstream(s string) string {
 	s = strings.TrimPrefix(s, "http://")
 	s = strings.TrimPrefix(s, "https://")
 	return s
+}
+
+func hasHeader(headers []string, name string) bool {
+	for _, h := range headers {
+		if strings.EqualFold(strings.Trim(h, "\"'"), name) {
+			return true
+		}
+	}
+	return false
 }

@@ -59,6 +59,16 @@ if grep -Eq '^AGENT_ENROLLMENT_TOKEN=.+' "$ENV_FILE"; then
   "${DC[@]}" --profile agent up -d pulse-agent
 fi
 
+# Rebuild the installer-managed agent (compose project 'pulse') if it's running,
+# so agent-side changes (new detectors) land on ./deploy.sh without re-running
+# the installer. The agent keeps its identity, so it won't re-enroll.
+if [ -f /opt/pulse/.env ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx pulse-agent; then
+  info "Rebuilding the local monitoring agent (new detectors)…"
+  docker compose -p pulse --env-file /opt/pulse/.env \
+    -f infrastructure/docker-compose.agent.yml up -d --build \
+    || info "agent rebuild skipped"
+fi
+
 echo
 "${DC[@]}" ps
 echo

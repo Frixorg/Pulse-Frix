@@ -227,6 +227,145 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// --- SSH hardening / ciphers / blank passwords (from ssh_config) ---
+	for _, cfg := range s.resourcesOfType(snap, "ssh_config") {
+		if v, _ := cfg.Attributes["permit_root_login"].(string); v == "yes" {
+			flag("ssh-hardening", securityFinding{
+				ID: "ssh-root", Severity: "WARNING",
+				Title: "Root SSH login is permitted", Resource: "sshd_config",
+				Detail:         "PermitRootLogin is 'yes' — remote root logins widen the blast radius of a compromised key or password.",
+				Recommendation: "Set PermitRootLogin prohibit-password (or no) and use a sudo user.",
+			})
+		}
+		if v, _ := cfg.Attributes["password_authentication"].(string); v == "yes" {
+			flag("ssh-hardening", securityFinding{
+				ID: "ssh-passauth", Severity: "INFO",
+				Title: "SSH password authentication is enabled", Resource: "sshd_config",
+				Detail:         "PasswordAuthentication 'yes' allows brute-forceable password logins.",
+				Recommendation: "Prefer key-based auth: set PasswordAuthentication no.",
+			})
+		}
+		if v, _ := cfg.Attributes["permit_empty_passwords"].(string); v == "yes" {
+			flag("blank-passwords", securityFinding{
+				ID: "ssh-emptypass", Severity: "CRITICAL",
+				Title: "SSH permits empty passwords", Resource: "sshd_config",
+				Detail:         "PermitEmptyPasswords 'yes' lets accounts with no password log in.",
+				Recommendation: "Set PermitEmptyPasswords no immediately.",
+			})
+		}
+		weak := append(append(toStringSlice(cfg.Attributes["weak_ciphers"]), toStringSlice(cfg.Attributes["weak_macs"])...), toStringSlice(cfg.Attributes["weak_kex"])...)
+		if len(weak) > 0 {
+			flag("cipher-suite", securityFinding{
+				ID: "ssh-weakcrypto", Severity: "WARNING",
+				Title: "Weak SSH ciphers/MACs/KEX enabled", Resource: "sshd_config",
+				Detail:         "The SSH daemon offers weak algorithms: " + strings.Join(weak, ", ") + ".",
+				Recommendation: "Restrict Ciphers/MACs/KexAlgorithms to modern suites (chacha20-poly1305, aes-gcm, curve25519).",
+			})
+		}
+	}
+
+	// --- Shared SSH keys ---
+	for _, k := range s.resourcesOfType(snap, "ssh_keys") {
+		if shared, _ := k.Attributes["shared"].(bool); shared {
+			flag("shared-ssh-keys", securityFinding{
+				ID: "shared-keys", Severity: "WARNING",
+				Title: "One SSH key is authorised for multiple users", Resource: "authorized_keys",
+				Detail:         "A shared key means access can't be attributed or revoked per-person (" + strings.Join(toStringSlice(k.Attributes["shared_keys"]), "; ") + ").",
+				Recommendation: "Give each person their own key and remove shared entries.",
+			})
+		}
+	}
+
+	// --- Container privileges / IPC / credentials ---
+	for _, c := range s.resourcesOfType(snap, "docker_container") {
+		if priv, _ := c.Attributes["privileged"].(bool); priv {
+			flag("privileged-flag", securityFinding{
+				ID: "priv-" + c.Name, Severity: "CRITICAL",
+				Title: c.Name + " runs in privileged mode", Resource: c.Name,
+				Detail:         "A privileged container can access all host devices and effectively escape isolation.",
+				Recommendation: "Drop --privileged; grant only the specific capabilities the container needs.",
+			})
+		}
+		if ipc, _ := c.Attributes["ipc_mode"].(string); ipc == "host" {
+			flag("shared-memory", securityFinding{
+				ID: "ipc-" + c.Name, Severity: "WARNING",
+				Title: c.Name + " shares the host IPC namespace", Resource: c.Name,
+				Detail:         "--ipc=host exposes host shared memory to the container (and vice-versa).",
+				Recommendation: "Remove --ipc=host unless the workload genuinely needs host shared memory.",
+			})
+		}
+		if blank, _ := c.Attributes["blank_password"].(bool); blank {
+			flag("blank-passwords", securityFinding{
+				ID: "blank-" + c.Name, Severity: "CRITICAL",
+				Title: c.Name + " has a blank password in its environment", Resource: c.Name,
+				Detail:         "A password environment variable is empty — the service may accept no password.",
+				Recommendation: "Set a strong password (and prefer secrets over env vars).",
+			})
+		}
+		if creds := toStringSlice(c.Attributes["weak_credentials"]); len(creds) > 0 {
+			flag("default-credentials", securityFinding{
+				ID: "weakcred-" + c.Name, Severity: "WARNING",
+				Title: c.Name + " uses a weak/default credential", Resource: c.Name,
+				Detail:         "These password variables are set to a well-known default value: " + strings.Join(creds, ", ") + ".",
+				Recommendation: "Rotate to strong, unique secrets.",
+			})
+		}
+	}
+
+	// --- Nginx security headers / info leakage / rate limiting (TLS vhosts) ---
+	missingHeaders, noRateLimit, tokensOn := 0, 0, 0
+	for _, vh := range s.resourcesOfType(snap, "nginx_vhost") {
+		if ssl, _ := vh.Attributes["ssl"].(bool); !ssl {
+			continue
+		}
+		hsts, _ := vh.Attributes["has_hsts"].(bool)
+		xframe, _ := vh.Attributes["has_xframe"].(bool)
+		csp, _ := vh.Attributes["has_csp"].(bool)
+		if !hsts || !xframe || !csp {
+			missingHeaders++
+			if missingHeaders <= 6 {
+				var missing []string
+				if !hsts {
+					missing = append(missing, "HSTS")
+				}
+				if !xframe {
+					missing = append(missing, "X-Frame-Options")
+				}
+				if !csp {
+					missing = append(missing, "Content-Security-Policy")
+				}
+				flag("security-headers", securityFinding{
+					ID: "hdr-" + vh.Name, Severity: "INFO",
+					Title: "Missing security headers on " + vh.Name, Resource: vh.Name,
+					Detail:         vh.Name + " does not set: " + strings.Join(missing, ", ") + ".",
+					Recommendation: "Add the missing add_header directives (HSTS, X-Frame-Options, CSP).",
+				})
+			}
+		}
+		if tokensOff, _ := vh.Attributes["server_tokens_off"].(bool); !tokensOff {
+			tokensOn++
+		}
+		if rl, _ := vh.Attributes["has_rate_limit"].(bool); !rl {
+			noRateLimit++
+		}
+	}
+	if tokensOn > 0 {
+		flag("information-leakage", securityFinding{
+			ID: "server-tokens", Severity: "INFO",
+			Title:          "Nginx exposes its version",
+			Detail:         fmt.Sprintf("%d vhost(s) don't set 'server_tokens off', so responses leak the nginx version.", tokensOn),
+			Recommendation: "Add 'server_tokens off;' in the http{} block.",
+		})
+	}
+	if noRateLimit > 0 {
+		flag("rate-limiting", securityFinding{
+			ID: "no-ratelimit", Severity: "INFO",
+			Title:          "No rate limiting on public vhosts",
+			Detail:         fmt.Sprintf("%d TLS vhost(s) have no limit_req — login/API endpoints are open to brute-force and abuse.", noRateLimit),
+			Recommendation: "Define a limit_req zone and apply it to sensitive locations.",
+		})
+	}
+
 	if findings == nil {
 		findings = []securityFinding{}
 	}
@@ -272,8 +411,6 @@ func buildSecurityChecks(issues map[string]int) []securityCheck {
 		{"tls-validity", "TLS / Certificate Validity"},
 		{"base-image", "Base Image Vulnerabilities"},
 		{"resource-boundaries", "Resource Boundaries"},
-	}
-	notAssessed := [][2]string{
 		{"ssh-hardening", "SSH Hardening"},
 		{"privileged-flag", "Privileged Flag"},
 		{"blank-passwords", "Blank Passwords"},
@@ -285,16 +422,13 @@ func buildSecurityChecks(issues map[string]int) []securityCheck {
 		{"information-leakage", "Information Leakage"},
 		{"rate-limiting", "Rate Limiting"},
 	}
-	out := make([]securityCheck, 0, len(assessed)+len(notAssessed))
+	out := make([]securityCheck, 0, len(assessed))
 	for _, c := range assessed {
 		st := "pass"
 		if issues[c[0]] > 0 {
 			st = "issues"
 		}
 		out = append(out, securityCheck{ID: c[0], Name: c[1], Status: st, Count: issues[c[0]]})
-	}
-	for _, c := range notAssessed {
-		out = append(out, securityCheck{ID: c[0], Name: c[1], Status: "not_assessed", Note: "Deeper host inspection — coming soon."})
 	}
 	return out
 }

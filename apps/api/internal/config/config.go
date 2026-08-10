@@ -135,8 +135,9 @@ func (c *Config) OIDCProviderByName(name string) (OIDCProvider, bool) {
 	return OIDCProvider{}, false
 }
 
-// SessionTTL is how long a web session lasts.
-func (c *Config) SessionTTL() time.Duration { return 12 * time.Hour }
+// SessionTTL is how long a web session lasts. Long-lived so users stay signed
+// in across visits; the cookie is HttpOnly + Secure and the store keys on a hash.
+func (c *Config) SessionTTL() time.Duration { return 30 * 24 * time.Hour }
 
 // EnrollmentTTL is how long an enrollment token is valid.
 func (c *Config) EnrollmentTTL() time.Duration { return 15 * time.Minute }

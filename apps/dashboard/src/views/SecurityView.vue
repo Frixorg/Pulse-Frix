@@ -133,7 +133,7 @@ function fmtTime(t?: string) {
         <div class="clean-badge">✓</div>
         <div>
           <div class="clean-t">No issues in this view</div>
-          <p class="clean-d">Pulse flags the risks it can see from read-only discovery. Deeper host checks (SSH, headers, privileges) are coming soon.</p>
+          <p class="clean-d">Every check ran against your read-only discovery data — exposure, TLS, SSH hardening, container privileges, credentials, headers and rate limiting — and found nothing to flag here.</p>
         </div>
       </div>
 

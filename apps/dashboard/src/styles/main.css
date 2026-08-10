@@ -119,6 +119,29 @@ h4,
   }
 }
 
+/* Pulsing status dot next to the brand/title, everywhere it appears. */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.75);
+  }
+}
+.brand-dot,
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-dot,
+  .pulse-dot {
+    animation: none;
+  }
+}
+
 /* Thin, unobtrusive scrollbars for a technical feel. */
 ::-webkit-scrollbar {
   width: 10px;

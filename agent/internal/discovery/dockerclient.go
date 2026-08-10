@@ -140,6 +140,25 @@ func (c *dockerClient) stats(ctx context.Context, id string) (dockerStats, error
 	return s, err
 }
 
+// dockerInspect is a subset of GET /containers/{id}/json used for security
+// posture (privileged flag, IPC mode, environment credential hygiene).
+type dockerInspect struct {
+	Config struct {
+		Env []string `json:"Env"`
+	} `json:"Config"`
+	HostConfig struct {
+		Privileged  bool     `json:"Privileged"`
+		IpcMode     string   `json:"IpcMode"`
+		SecurityOpt []string `json:"SecurityOpt"`
+	} `json:"HostConfig"`
+}
+
+func (c *dockerClient) inspect(ctx context.Context, id string) (dockerInspect, error) {
+	var di dockerInspect
+	err := c.get(ctx, "/containers/"+id+"/json", &di)
+	return di, err
+}
+
 // cpuPercent computes CPU usage percentage from two stat samples (as Docker CLI does).
 func (s dockerStats) cpuPercent() float64 {
 	cpuDelta := float64(s.CPUStats.CPUUsage.TotalUsage) - float64(s.PreCPUStats.CPUUsage.TotalUsage)

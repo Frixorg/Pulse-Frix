@@ -17,5 +17,6 @@ func DefaultDetectors() []Detector {
 		ApplicationDetector{},
 		SSLDetector{},
 		MonitoringDetector{},
+		SecurityDetector{},
 	}
 }

@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import type { LogEntry } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import CustomSelect from "@/components/CustomSelect.vue";
 
 const servers = useServersStore();
 const { selected } = storeToRefs(servers);
@@ -17,6 +18,10 @@ const entries = ref<LogEntry[]>([]);
 const live = ref(true);
 const loading = ref(false);
 const copied = ref(false);
+const sourceOptions = computed(() => [
+  { value: "", label: "All containers" },
+  ...sources.value.map((s) => ({ value: s, label: s })),
+]);
 const logEl = ref<HTMLElement | null>(null);
 let poll: number | undefined;
 let searchTimer: number | undefined;
@@ -100,10 +105,7 @@ watch(q, () => {
     <EmptyState v-if="!selected" title="No server selected" />
     <template v-else>
       <div class="controls">
-        <select v-model="source" class="ctl">
-          <option value="">All containers</option>
-          <option v-for="s in sources" :key="s" :value="s">{{ s }}</option>
-        </select>
+        <CustomSelect v-model="source" :options="sourceOptions" min-width="220px" />
         <input v-model="q" class="ctl search" placeholder="Filter…" spellcheck="false" />
         <button class="ctl live" :class="{ on: live }" @click="toggleLive">
           <span class="live-dot" :class="{ on: live }"></span>

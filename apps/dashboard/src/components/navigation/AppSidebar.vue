@@ -5,6 +5,8 @@ import { useServersStore } from "@/stores/servers";
 import { useAuthStore } from "@/stores/auth";
 import ThemeToggle from "@/components/ThemeToggle.vue";
 
+defineProps<{ open?: boolean }>();
+
 const servers = useServersStore();
 const auth = useAuthStore();
 const router = useRouter();
@@ -43,7 +45,7 @@ async function logout() {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ open }">
     <div class="brand-row">
       <span class="brand-dot"></span>
       <span class="brand-name">PulseFrix</span>
@@ -206,5 +208,23 @@ async function logout() {
 .signout:hover {
   color: var(--pulse-down);
   background: rgba(248, 113, 113, 0.1);
+}
+
+/* Mobile: the sidebar becomes a slide-in drawer. */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 20px 0 60px rgba(0, 0, 0, 0.5);
+    background: var(--pulse-solid);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
 }
 </style>

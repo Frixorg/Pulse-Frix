@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
-import { RouterView } from "vue-router";
+import { onMounted, ref, watch } from "vue";
+import { RouterView, useRoute } from "vue-router";
 import AppSidebar from "@/components/navigation/AppSidebar.vue";
 import AppTopbar from "@/components/navigation/AppTopbar.vue";
 import AtmosphereBg from "@/components/AtmosphereBg.vue";
 import { useServersStore } from "@/stores/servers";
 
 const servers = useServersStore();
+const route = useRoute();
+const sidebarOpen = ref(false);
+
 onMounted(() => servers.load());
+watch(() => route.fullPath, () => (sidebarOpen.value = false));
 </script>
 
 <template>
   <div class="shell">
     <AtmosphereBg />
     <div class="shell-in">
-      <AppSidebar />
+      <AppSidebar :open="sidebarOpen" />
+      <div class="backdrop" :class="{ show: sidebarOpen }" @click="sidebarOpen = false"></div>
       <div class="col">
-        <AppTopbar />
+        <AppTopbar @menu="sidebarOpen = true" />
         <main class="main">
           <RouterView />
         </main>
@@ -49,5 +54,28 @@ onMounted(() => servers.load());
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+}
+.backdrop {
+  display: none;
+}
+@media (max-width: 900px) {
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgba(3, 4, 6, 0.5);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .backdrop.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .main {
+    padding: 16px;
+  }
 }
 </style>

@@ -21,6 +21,13 @@ var ErrNotFound = errors.New("not found")
 // ErrAlreadyExists is returned when creating a duplicate (e.g. an email).
 var ErrAlreadyExists = errors.New("already exists")
 
+// MetricSample is one stored metrics reading with its ingest time. The Sample
+// is the raw agent metrics JSON; the handler extracts the requested series.
+type MetricSample struct {
+	TS     time.Time
+	Sample json.RawMessage
+}
+
 // Store is the control-plane persistence interface.
 type Store interface {
 	// --- auth ---
@@ -57,6 +64,10 @@ type Store interface {
 	GetDiscovery(orgID, serverID string) (json.RawMessage, error)
 	SaveMetrics(orgID, serverID string, sample json.RawMessage) error
 	GetMetrics(orgID, serverID string) (json.RawMessage, error)
+	// AppendMetricSample records a point in the append-only history; QueryMetricHistory
+	// returns points at/after `since`, oldest first. Together they power the charts.
+	AppendMetricSample(orgID, serverID string, ts time.Time, sample json.RawMessage) error
+	QueryMetricHistory(orgID, serverID string, since time.Time) ([]MetricSample, error)
 
 	// --- alerts, events, audit ---
 	ListAlerts(orgID string) ([]model.Alert, error)

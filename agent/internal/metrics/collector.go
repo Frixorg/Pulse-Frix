@@ -21,10 +21,12 @@ type Sample struct {
 	MemTotalBytes uint64    `json:"mem_total_bytes"`
 	MemUsedBytes  uint64    `json:"mem_used_bytes"`
 	MemAvailBytes uint64    `json:"mem_avail_bytes"`
-	SwapTotal     uint64    `json:"swap_total_bytes"`
-	SwapUsed      uint64    `json:"swap_used_bytes"`
-	NetRxBytes    uint64    `json:"net_rx_bytes"`
-	NetTxBytes    uint64    `json:"net_tx_bytes"`
+	SwapTotal      uint64 `json:"swap_total_bytes"`
+	SwapUsed       uint64 `json:"swap_used_bytes"`
+	NetRxBytes     uint64 `json:"net_rx_bytes"`
+	NetTxBytes     uint64 `json:"net_tx_bytes"`
+	DiskTotalBytes uint64 `json:"disk_total_bytes"`
+	DiskUsedBytes  uint64 `json:"disk_used_bytes"`
 }
 
 // cpuTimes holds a snapshot of aggregate CPU jiffies from /proc/stat.
@@ -35,12 +37,20 @@ type cpuTimes struct {
 
 // Collector produces Samples, keeping the previous CPU reading to compute usage.
 type Collector struct {
-	prev cpuTimes
-	have bool
+	prev   cpuTimes
+	have   bool
+	rootfs string // host filesystem prefix for disk stats (e.g. "/host")
 }
 
-// NewCollector creates a metrics collector.
-func NewCollector() *Collector { return &Collector{} }
+// NewCollector creates a metrics collector. It reads PULSE_ROOTFS to locate the
+// host filesystem for disk usage (defaults to "/").
+func NewCollector() *Collector {
+	root := os.Getenv("PULSE_ROOTFS")
+	if root == "" {
+		root = "/"
+	}
+	return &Collector{rootfs: root}
+}
 
 // Sample reads current metrics.
 func (c *Collector) Sample() Sample {
@@ -49,6 +59,7 @@ func (c *Collector) Sample() Sample {
 	s.Load1, s.Load5, s.Load15 = loadAvg()
 	s.MemTotalBytes, s.MemUsedBytes, s.MemAvailBytes, s.SwapTotal, s.SwapUsed = memInfo()
 	s.NetRxBytes, s.NetTxBytes = netTotals()
+	s.DiskTotalBytes, s.DiskUsedBytes = diskUsage(c.rootfs)
 	return s
 }
 

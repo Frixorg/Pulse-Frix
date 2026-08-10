@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS metric_samples (
     PRIMARY KEY (org_id, server_id)
 );
 
+-- Append-only time series of metric samples (powers the historical charts).
+-- Pruned by the app on write; short retention keeps it small.
+CREATE TABLE IF NOT EXISTS metric_history (
+    org_id     TEXT NOT NULL,
+    server_id  TEXT NOT NULL,
+    ts         TIMESTAMPTZ NOT NULL,
+    sample     JSONB NOT NULL,
+    PRIMARY KEY (org_id, server_id, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_metric_history_lookup ON metric_history(org_id, server_id, ts DESC);
+
 CREATE TABLE IF NOT EXISTS alerts (
     id               TEXT PRIMARY KEY,
     org_id           TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

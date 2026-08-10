@@ -34,6 +34,25 @@ fi
 info "Building and starting the Pulse Cloud stack..."
 "${DC[@]}" up -d --build
 
+# Apply the database schema (idempotent: every statement is IF NOT EXISTS, plus
+# self-healing ALTERs). Runs on every deploy so new tables/columns land without
+# a manual psql step.
+info "Applying database schema..."
+# shellcheck disable=SC1090
+set -a; . "$ENV_FILE"; set +a
+for _ in $(seq 1 15); do
+  docker exec pulse-postgres pg_isready -U pulse >/dev/null 2>&1 && break
+  sleep 1
+done
+if docker run --rm -i --network pulse-net -e PGPASSWORD="${POSTGRES_PASSWORD:-}" postgres:16-alpine \
+     psql -h pulse-postgres -U pulse -d pulse < apps/api/migrations/0001_init.sql >/dev/null 2>&1; then
+  ok "Schema applied."
+  info "Restarting the API so it picks up the schema..."
+  "${DC[@]}" restart pulse-api >/dev/null
+else
+  info "Schema step skipped or already up to date."
+fi
+
 # Start the local monitoring agent only if a token is configured.
 if grep -Eq '^AGENT_ENROLLMENT_TOKEN=.+' "$ENV_FILE"; then
   info "Enrollment token found — starting the local agent..."

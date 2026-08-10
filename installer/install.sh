@@ -363,13 +363,21 @@ apply_cloud() {
   # with "permission denied" and never enrolls.
   as_root chown -R 65532:65532 "$PULSE_HOME/agent-data"
 
-  local api_url env_file
+  local api_url env_file docker_gid
   api_url="${PULSE_API_URL:-https://pulse.frix.me}"
   # If the control plane runs on THIS host, reach it through the dashboard's
   # local port instead of hairpinning out to the public domain.
   if have docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "pulse-api"; then
     api_url="http://127.0.0.1:8090"
     info "Control plane detected on this host — pointing the agent at ${api_url}"
+  fi
+
+  # Grant the non-root agent (uid 65532) read access to the Docker socket by
+  # adding its owning group. Detect the socket's gid; fall back to the common
+  # docker gid. Without this the container discovery finds nothing.
+  docker_gid="999"
+  if [ -S /var/run/docker.sock ]; then
+    docker_gid="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 999)"
   fi
 
   env_file="$PULSE_HOME/.env"
@@ -379,6 +387,8 @@ PULSE_API_URL=$api_url
 AGENT_ENROLLMENT_TOKEN=$ENROLL_TOKEN
 PULSE_DATA_DIR=/data
 PULSE_AGENT_DATA_DIR=$PULSE_HOME/agent-data
+PULSE_ROOTFS=/host
+DOCKER_GID=$docker_gid
 EOF
   as_root chmod 600 "$env_file"
   ok "wrote agent configuration to $env_file (0600)"

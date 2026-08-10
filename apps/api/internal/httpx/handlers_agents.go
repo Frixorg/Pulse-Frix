@@ -180,8 +180,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.SaveDiscovery(agent.OrgID, agent.ServerID, env.Body)
 		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, time.Now().UTC(), model.HealthHealthy)
 	case "metrics":
+		now := time.Now().UTC()
 		_ = s.store.SaveMetrics(agent.OrgID, agent.ServerID, env.Body)
-		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, time.Now().UTC(), model.HealthHealthy)
+		_ = s.store.AppendMetricSample(agent.OrgID, agent.ServerID, now, env.Body)
+		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, now, model.HealthHealthy)
 	case "heartbeat", "hello", "health":
 		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, time.Now().UTC(), model.HealthHealthy)
 	default:

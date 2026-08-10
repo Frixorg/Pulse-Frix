@@ -155,7 +155,14 @@ services:
       PULSE_API_URL: http://127.0.0.1:8090
       PULSE_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-}
       PULSE_DATA_DIR: /data
+      PULSE_ROOTFS: /host
+    group_add:
+      - "${DOCKER_GID:-999}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - pulse-agent-data:/data
+      # READ-ONLY host visibility for accurate discovery + disk metrics.
+      - /:/host:ro,rslave
+      - /etc/nginx:/etc/nginx:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     mem_limit: 128m

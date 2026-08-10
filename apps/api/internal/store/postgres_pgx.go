@@ -342,6 +342,39 @@ func (p *Postgres) GetMetrics(orgID, serverID string) (json.RawMessage, error) {
 	return json.RawMessage(b), err
 }
 
+func (p *Postgres) AppendMetricSample(orgID, serverID string, ts time.Time, sample json.RawMessage) error {
+	if _, err := p.db.Exec(`
+		INSERT INTO metric_history(org_id,server_id,ts,sample) VALUES($1,$2,$3,$4)
+		ON CONFLICT (org_id,server_id,ts) DO NOTHING`,
+		orgID, serverID, ts, []byte(sample)); err != nil {
+		return err
+	}
+	// Opportunistic retention: keep ~7 days of history per server.
+	_, _ = p.db.Exec(`DELETE FROM metric_history WHERE org_id=$1 AND server_id=$2 AND ts < $3`,
+		orgID, serverID, ts.Add(-7*24*time.Hour))
+	return nil
+}
+
+func (p *Postgres) QueryMetricHistory(orgID, serverID string, since time.Time) ([]MetricSample, error) {
+	rows, err := p.db.Query(`SELECT ts,sample FROM metric_history WHERE org_id=$1 AND server_id=$2 AND ts>=$3 ORDER BY ts`,
+		orgID, serverID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MetricSample
+	for rows.Next() {
+		var ms MetricSample
+		var b []byte
+		if err := rows.Scan(&ms.TS, &b); err != nil {
+			return nil, err
+		}
+		ms.Sample = json.RawMessage(b)
+		out = append(out, ms)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) ListAlerts(orgID string) ([]model.Alert, error) {
 	rows, err := p.db.Query(`SELECT id,org_id,name,expr,severity,for_seconds,cooldown_seconds,enabled FROM alerts WHERE org_id=$1 ORDER BY name`, orgID)
 	if err != nil {

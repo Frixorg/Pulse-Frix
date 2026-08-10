@@ -25,10 +25,21 @@ services:
       PULSE_API_URL: ${PULSE_API_URL:-https://pulse.frix.me}
       PULSE_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-}
       PULSE_DATA_DIR: /data
+      # Read host files (disk usage, nginx vhosts, TLS certs) under this prefix.
+      PULSE_ROOTFS: /host
+    # Add the Docker socket's group so the non-root agent can read it (installer
+    # detects the gid). Without this, container discovery returns nothing.
+    group_add:
+      - "${DOCKER_GID:-999}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Host directory (installer creates it and chowns to uid 65532) so the
       # non-root agent can persist its identity. Avoids the root-owned named
       # volume trap that blocked identity.json writes.
       - ${PULSE_AGENT_DATA_DIR:-/opt/pulse/agent-data}:/data
+      # READ-ONLY host visibility for accurate discovery + disk metrics.
+      # Nothing is ever written back to the host.
+      - /:/host:ro,rslave
+      - /etc/nginx:/etc/nginx:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     mem_limit: 128m

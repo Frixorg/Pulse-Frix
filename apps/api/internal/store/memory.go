@@ -28,6 +28,7 @@ type Memory struct {
 	enrollments map[string]*model.EnrollmentToken // tokenHash -> token
 	discovery   map[string]json.RawMessage        // orgID/serverID -> snapshot
 	metrics     map[string]json.RawMessage        // orgID/serverID -> sample
+	metricHist  map[string][]MetricSample         // orgID/serverID -> history
 	alerts      map[string]*model.Alert           // id -> alert
 	instances   map[string]*model.AlertInstance   // id -> instance
 	events      []*model.Event
@@ -49,6 +50,7 @@ func NewMemory() *Memory {
 		enrollments: map[string]*model.EnrollmentToken{},
 		discovery:   map[string]json.RawMessage{},
 		metrics:     map[string]json.RawMessage{},
+		metricHist:  map[string][]MetricSample{},
 		alerts:      map[string]*model.Alert{},
 		instances:   map[string]*model.AlertInstance{},
 	}
@@ -227,6 +229,7 @@ func (m *Memory) DeleteServer(orgID, id string) error {
 	delete(m.servers, id)
 	delete(m.discovery, key(orgID, s.ServerID))
 	delete(m.metrics, key(orgID, s.ServerID))
+	delete(m.metricHist, key(orgID, s.ServerID))
 	return nil
 }
 
@@ -336,6 +339,34 @@ func (m *Memory) GetMetrics(orgID, serverID string) (json.RawMessage, error) {
 		return nil, ErrNotFound
 	}
 	return raw, nil
+}
+
+func (m *Memory) AppendMetricSample(orgID, serverID string, ts time.Time, sample json.RawMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := key(orgID, serverID)
+	cp := make(json.RawMessage, len(sample))
+	copy(cp, sample)
+	h := append(m.metricHist[k], MetricSample{TS: ts, Sample: cp})
+	const maxPoints = 10000 // bound memory (dev store)
+	if len(h) > maxPoints {
+		h = h[len(h)-maxPoints:]
+	}
+	m.metricHist[k] = h
+	return nil
+}
+
+func (m *Memory) QueryMetricHistory(orgID, serverID string, since time.Time) ([]MetricSample, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	h := m.metricHist[key(orgID, serverID)]
+	out := make([]MetricSample, 0, len(h))
+	for _, s := range h {
+		if !s.TS.Before(since) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 // --- alerts, events, audit ---

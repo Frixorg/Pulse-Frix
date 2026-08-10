@@ -26,10 +26,18 @@ RUN go build -trimpath \
       -o /out/pulse-agent ./cmd/pulse-agent && \
     go build -trimpath -ldflags "-s -w" -o /out/pulse ./cmd/pulse
 
+# Seed an empty data dir so a fresh named volume mounted at /data inherits the
+# non-root owner below (Docker copies the image dir's ownership into a new
+# volume). Without this the volume is root-owned and the agent — which runs as
+# uid 65532 — cannot write identity.json.
+RUN mkdir -p /out/data && touch /out/data/.keep
+
 # ---------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/pulse-agent /usr/local/bin/pulse-agent
 COPY --from=build /out/pulse /usr/local/bin/pulse
+# /data owned by the runtime user (uid 65532) so the agent can persist identity.
+COPY --from=build --chown=65532:65532 /out/data /data
 
 # Runs as the distroless "nonroot" user (uid 65532). To read the Docker socket,
 # the socket's group must be granted to this user at run time (or use a proxy).

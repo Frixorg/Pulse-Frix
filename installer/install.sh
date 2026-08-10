@@ -356,8 +356,12 @@ report() {
 apply_cloud() {
   require_root_for_apply
   info "Applying (SAFE MODE — cloud agent)..."
-  as_root mkdir -p "$PULSE_HOME"/{agent,state}
+  as_root mkdir -p "$PULSE_HOME"/{agent,state} "$PULSE_HOME/agent-data"
   as_root chmod 750 "$PULSE_HOME"
+  # The agent runs as the non-root distroless user (uid 65532). Make its data
+  # directory writable so it can persist identity.json — otherwise it crash-loops
+  # with "permission denied" and never enrolls.
+  as_root chown -R 65532:65532 "$PULSE_HOME/agent-data"
 
   local api_url env_file
   api_url="${PULSE_API_URL:-https://pulse.frix.me}"
@@ -374,6 +378,7 @@ PULSE_MODE=cloud
 PULSE_API_URL=$api_url
 AGENT_ENROLLMENT_TOKEN=$ENROLL_TOKEN
 PULSE_DATA_DIR=/data
+PULSE_AGENT_DATA_DIR=$PULSE_HOME/agent-data
 EOF
   as_root chmod 600 "$env_file"
   ok "wrote agent configuration to $env_file (0600)"
@@ -415,10 +420,15 @@ verify_cloud() {
   fi
   ok "agent container is running"
   local i logs
-  for i in $(seq 1 10); do
+  for i in $(seq 1 15); do
     logs="$(docker logs pulse-agent 2>&1 || true)"
     if printf '%s' "$logs" | grep -qi "enrolled with cloud"; then
       ok "agent enrolled with the control plane"
+      return 0
+    fi
+    if printf '%s' "$logs" | grep -qi "failed to load config"; then
+      warn "the agent can't start: $(printf '%s' "$logs" | grep -i 'failed to load config' | tail -1)"
+      warn "inspect with 'docker logs pulse-agent'."
       return 0
     fi
     if printf '%s' "$logs" | grep -qi "enrollment failed"; then

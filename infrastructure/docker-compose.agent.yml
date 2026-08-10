@@ -10,9 +10,6 @@
 # =============================================================================
 name: pulse
 
-volumes:
-  pulse-agent-data:
-
 services:
   pulse-agent:
     build:
@@ -30,5 +27,8 @@ services:
       PULSE_DATA_DIR: /data
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - pulse-agent-data:/data
+      # Host directory (installer creates it and chowns to uid 65532) so the
+      # non-root agent can persist its identity. Avoids the root-owned named
+      # volume trap that blocked identity.json writes.
+      - ${PULSE_AGENT_DATA_DIR:-/opt/pulse/agent-data}:/data
     mem_limit: 128m

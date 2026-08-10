@@ -55,18 +55,33 @@ func main() {
 			logger.Error("invalid agent identity", "error", err)
 			os.Exit(1)
 		}
-		// Enroll on first cloud start (outbound; token-authenticated).
+		// Enroll on first cloud start (outbound; token-authenticated). Retry a
+		// few times so a control plane that is briefly busy right after startup
+		// doesn't strand the agent for the rest of its lifetime.
 		if cfg.EnrollmentToken != "" && !cfg.Identity.Enrolled {
-			enrollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			hostname, _ := os.Hostname()
-			resp, err := protocol.Enroll(enrollCtx, cfg.APIURL, protocol.EnrollRequest{
-				EnrollmentToken: cfg.EnrollmentToken,
-				InstallationID:  cfg.Identity.InstallationID,
-				PublicKey:       cfg.Identity.PublicKey,
-				ProtocolVersion: version.Protocol,
-				Fingerprint:     map[string]string{"hostname": hostname, "os": runtime.GOOS, "arch": runtime.GOARCH},
-			})
-			cancel()
+			var resp *protocol.EnrollResponse
+			var err error
+			for attempt := 1; attempt <= 5; attempt++ {
+				enrollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				resp, err = protocol.Enroll(enrollCtx, cfg.APIURL, protocol.EnrollRequest{
+					EnrollmentToken: cfg.EnrollmentToken,
+					InstallationID:  cfg.Identity.InstallationID,
+					PublicKey:       cfg.Identity.PublicKey,
+					ProtocolVersion: version.Protocol,
+					Fingerprint:     map[string]string{"hostname": hostname, "os": runtime.GOOS, "arch": runtime.GOARCH},
+				})
+				cancel()
+				if err == nil {
+					break
+				}
+				logger.Warn("enrollment attempt failed; will retry", "attempt", attempt, "error", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
+			}
 			if err != nil {
 				logger.Warn("enrollment failed; monitoring continues locally", "error", err)
 			} else {

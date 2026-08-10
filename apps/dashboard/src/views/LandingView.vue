@@ -33,7 +33,7 @@ const features = [
     <header class="nav">
       <div class="nav-in shell">
         <a class="brand" href="#top">
-          <span class="brand-dot"></span> Pulse
+          <span class="brand-dot"></span> PulseFrix
         </a>
         <nav class="nav-links">
           <a href="#features">Features</a>

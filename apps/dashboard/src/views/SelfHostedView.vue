@@ -25,7 +25,7 @@ function copy(text: string, id: string) {
     <div class="wrap">
       <header class="head">
         <RouterLink to="/" class="brand">
-          <span class="brand-dot"></span><span class="brand-name">Pulse</span>
+          <span class="brand-dot"></span><span class="brand-name">PulseFrix</span>
         </RouterLink>
         <RouterLink to="/login" class="back">← Back to sign in</RouterLink>
       </header>

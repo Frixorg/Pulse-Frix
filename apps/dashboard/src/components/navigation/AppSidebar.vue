@@ -46,7 +46,7 @@ async function logout() {
   <aside class="sidebar">
     <div class="brand-row">
       <span class="brand-dot"></span>
-      <span class="brand-name">Pulse</span>
+      <span class="brand-name">PulseFrix</span>
     </div>
 
     <nav class="nav">

@@ -425,6 +425,17 @@ func (p *Postgres) UpdateAlert(orgID string, a *model.Alert) error {
 	return nil
 }
 
+func (p *Postgres) DeleteAlert(orgID, id string) error {
+	res, err := p.db.Exec(`DELETE FROM alerts WHERE org_id=$1 AND id=$2`, orgID, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (p *Postgres) ListAlertInstances(orgID string) ([]model.AlertInstance, error) {
 	rows, err := p.db.Query(`SELECT id,org_id,alert_id,name,severity,server_id,state,dedup_key,COALESCE(root_cause,''),COALESCE(affected,'[]'),started_at,resolved_at FROM alert_instances WHERE org_id=$1 ORDER BY started_at DESC`, orgID)
 	if err != nil {

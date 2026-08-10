@@ -77,6 +77,7 @@ type Store interface {
 	ListAlerts(orgID string) ([]model.Alert, error)
 	CreateAlert(a *model.Alert) error
 	UpdateAlert(orgID string, a *model.Alert) error
+	DeleteAlert(orgID, id string) error
 	ListAlertInstances(orgID string) ([]model.AlertInstance, error)
 	UpsertAlertInstance(i *model.AlertInstance) error
 

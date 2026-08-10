@@ -46,6 +46,26 @@ function toggleCat(c: SecurityCheck) {
   if (c.status !== "issues") return;
   activeCat.value = activeCat.value === c.id ? null : c.id;
 }
+
+const rerunning = ref<string | null>(null);
+async function rerunCheck(c: SecurityCheck, e: Event) {
+  e.stopPropagation();
+  if (!selected.value || c.status === "not_assessed") return;
+  rerunning.value = c.id;
+  try {
+    const res = await api.security(selected.value.id, c.id);
+    if (audit.value) {
+      const nc = res.checks[0];
+      audit.value.checks = audit.value.checks.map((x) => (x.id === c.id ? nc ?? x : x));
+      const others = audit.value.findings.filter((f) => f.category !== c.id);
+      audit.value.findings = [...others, ...res.findings];
+    }
+  } catch {
+    /* ignore */
+  } finally {
+    rerunning.value = null;
+  }
+}
 function sevClass(s: string) {
   return s === "CRITICAL" ? "crit" : s === "WARNING" ? "warn" : "info";
 }
@@ -77,7 +97,7 @@ function fmtTime(t?: string) {
 
       <!-- Check catalogue -->
       <div class="checks">
-        <button
+        <div
           v-for="c in checks"
           :key="c.id"
           class="chk"
@@ -90,7 +110,17 @@ function fmtTime(t?: string) {
           <span v-if="c.status === 'issues'" class="chk-n">{{ c.count }}</span>
           <span v-else-if="c.status === 'pass'" class="chk-ok">✓</span>
           <span v-else class="chk-soon">soon</span>
-        </button>
+          <button
+            v-if="c.status !== 'not_assessed'"
+            class="chk-rerun"
+            :title="`Re-run ${c.name}`"
+            @click="rerunCheck(c, $event)"
+          >
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" :class="{ spin: rerunning === c.id }">
+              <path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <!-- Findings -->
@@ -246,6 +276,21 @@ function fmtTime(t?: string) {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--pulse-text-muted);
+}
+.chk-rerun {
+  margin-left: 2px;
+  background: transparent;
+  border: 0;
+  color: var(--pulse-text-muted);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 6px;
+  display: inline-grid;
+  place-items: center;
+}
+.chk-rerun:hover {
+  color: var(--pulse-accent);
+  background: var(--pulse-surface-2);
 }
 .filter-note {
   font-size: 12.5px;

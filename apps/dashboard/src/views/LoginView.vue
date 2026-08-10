@@ -58,7 +58,7 @@ async function submit() {
     <div class="login-in">
       <RouterLink to="/" class="brand">
         <span class="brand-dot"></span>
-        <span class="brand-name">Pulse</span>
+        <span class="brand-name">PulseFrix</span>
       </RouterLink>
 
       <div class="glass">

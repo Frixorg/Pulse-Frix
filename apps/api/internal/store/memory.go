@@ -427,6 +427,17 @@ func (m *Memory) UpdateAlert(orgID string, a *model.Alert) error {
 	return nil
 }
 
+func (m *Memory) DeleteAlert(orgID, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.alerts[id]
+	if !ok || a.OrgID != orgID {
+		return ErrNotFound
+	}
+	delete(m.alerts, id)
+	return nil
+}
+
 func (m *Memory) ListAlertInstances(orgID string) ([]model.AlertInstance, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

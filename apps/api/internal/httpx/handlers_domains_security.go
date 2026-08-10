@@ -230,9 +230,33 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 	if findings == nil {
 		findings = []securityFinding{}
 	}
+	allChecks := buildSecurityChecks(issues)
+
+	// Re-run a single check: return just that check and its findings.
+	if only := r.URL.Query().Get("check"); only != "" {
+		fs := []securityFinding{}
+		for _, f := range findings {
+			if f.Category == only {
+				fs = append(fs, f)
+			}
+		}
+		cks := []securityCheck{}
+		for _, c := range allChecks {
+			if c.ID == only {
+				cks = append(cks, c)
+			}
+		}
+		JSON(w, http.StatusOK, map[string]any{
+			"generated_at": time.Now().UTC(),
+			"checks":       cks,
+			"findings":     fs,
+		})
+		return
+	}
+
 	JSON(w, http.StatusOK, map[string]any{
 		"generated_at": time.Now().UTC(),
-		"checks":       buildSecurityChecks(issues),
+		"checks":       allChecks,
 		"findings":     findings,
 	})
 }

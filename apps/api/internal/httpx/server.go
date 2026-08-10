@@ -29,6 +29,8 @@ type Server struct {
 	enrollLimiter *Limiter
 	ingestLimiter *Limiter
 
+	alerts *alertEngine
+
 	nonceOnce   sync.Once
 	nonceCacheV *nonceCache
 }
@@ -59,6 +61,7 @@ func New(cfg *config.Config, st store.Store, logger *slog.Logger) *Server {
 		loginLimiter:  NewLimiter(0.2, 5),  // ~5 attempts then 1 / 5s
 		enrollLimiter: NewLimiter(0.1, 3),  // strict on enrollment
 		ingestLimiter: NewLimiter(50, 100), // agent ingestion (per IP)
+		alerts:        newAlertEngine(),
 	}
 }
 
@@ -106,6 +109,8 @@ func (s *Server) Handler() http.Handler {
 	// Alerts, events, audit
 	mux.HandleFunc("GET /api/v1/alerts", s.requirePerm(rbac.AlertRead, s.handleListAlerts))
 	mux.HandleFunc("POST /api/v1/alerts", s.requirePerm(rbac.AlertManage, s.handleCreateAlert))
+	mux.HandleFunc("PATCH /api/v1/alerts/{id}", s.requirePerm(rbac.AlertManage, s.handleUpdateAlert))
+	mux.HandleFunc("DELETE /api/v1/alerts/{id}", s.requirePerm(rbac.AlertManage, s.handleDeleteAlert))
 	mux.HandleFunc("GET /api/v1/alerts/instances", s.requirePerm(rbac.AlertRead, s.handleAlertInstances))
 	mux.HandleFunc("GET /api/v1/events", s.requirePerm(rbac.EventRead, s.handleListEvents))
 	mux.HandleFunc("GET /api/v1/audit", s.requirePerm(rbac.AuditRead, s.handleListAudit))

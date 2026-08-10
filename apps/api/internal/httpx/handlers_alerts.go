@@ -62,13 +62,44 @@ func (s *Server) handleCreateAlert(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusCreated, alert)
 }
 
-func (s *Server) handleAlertInstances(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUpdateAlert(w http.ResponseWriter, r *http.Request) {
 	p := s.principal(r)
-	insts, err := s.store.ListAlertInstances(p.OrgID)
-	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not list alert instances")
+	var req createAlertRequest
+	if err := decodeJSON(r, &req, 8192); err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, "invalid request body")
 		return
 	}
+	sev := model.Severity(req.Severity)
+	if sev != model.SevInfo && sev != model.SevWarning && sev != model.SevCritical {
+		sev = model.SevWarning
+	}
+	alert := &model.Alert{
+		ID: r.PathValue("id"), OrgID: p.OrgID, Name: req.Name, Expr: req.Expr,
+		Severity: sev, ForSeconds: req.ForSeconds, CooldownSeconds: req.CooldownSeconds, Enabled: req.Enabled,
+	}
+	if err := s.store.UpdateAlert(p.OrgID, alert); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "alert not found")
+		return
+	}
+	s.audit.Record(p.OrgID, p.Email, "alert.update", "success", clientIP(r), map[string]any{"id": alert.ID})
+	JSON(w, http.StatusOK, alert)
+}
+
+func (s *Server) handleDeleteAlert(w http.ResponseWriter, r *http.Request) {
+	p := s.principal(r)
+	if err := s.store.DeleteAlert(p.OrgID, r.PathValue("id")); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "alert not found")
+		return
+	}
+	s.audit.Record(p.OrgID, p.Email, "alert.delete", "success", clientIP(r), map[string]any{"id": r.PathValue("id")})
+	JSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleAlertInstances(w http.ResponseWriter, r *http.Request) {
+	p := s.principal(r)
+	// Evaluate rules against the latest data, then return what's firing now.
+	s.evaluateAlerts(p.OrgID)
+	insts := s.firingInstances(p.OrgID)
 	if insts == nil {
 		insts = []model.AlertInstance{}
 	}

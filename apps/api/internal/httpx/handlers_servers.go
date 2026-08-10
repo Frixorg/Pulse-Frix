@@ -142,18 +142,17 @@ func (s *Server) handleServerSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Alert instance counts.
-	if insts, err := s.store.ListAlertInstances(p.OrgID); err == nil {
-		for _, ai := range insts {
-			if ai.State != "firing" || ai.ServerID != srv.ServerID {
-				continue
-			}
-			switch ai.Severity {
-			case model.SevCritical:
-				sum.Counts.AlertsCritical++
-			case model.SevWarning:
-				sum.Counts.AlertsWarning++
-			}
+	// Alert counts come from the live evaluator (in-memory firing set).
+	s.evaluateAlerts(p.OrgID)
+	for _, ai := range s.firingInstances(p.OrgID) {
+		if ai.ServerID != srv.ServerID {
+			continue
+		}
+		switch ai.Severity {
+		case model.SevCritical:
+			sum.Counts.AlertsCritical++
+		case model.SevWarning:
+			sum.Counts.AlertsWarning++
 		}
 	}
 

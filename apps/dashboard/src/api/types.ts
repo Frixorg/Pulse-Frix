@@ -95,12 +95,24 @@ export interface SecurityAudit {
   findings: SecurityFinding[];
 }
 
+export interface Alert {
+  id: string;
+  org_id: string;
+  name: string;
+  expr: string;
+  severity: Severity;
+  for_seconds: number;
+  cooldown_seconds: number;
+  enabled: boolean;
+}
+
 export interface AlertInstance {
   id: string;
   name: string;
   severity: Severity;
   state: "firing" | "resolved";
   server_id: string;
+  dedup_key: string;
   started_at: string;
   resolved_at?: string;
   root_cause?: string;

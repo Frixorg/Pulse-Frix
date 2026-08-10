@@ -337,6 +337,23 @@ func (p *Postgres) GetDiscovery(orgID, serverID string) (json.RawMessage, error)
 	return json.RawMessage(b), err
 }
 
+func (p *Postgres) SaveLogs(orgID, serverID string, logs json.RawMessage) error {
+	_, err := p.db.Exec(`
+		INSERT INTO log_snapshots(org_id,server_id,logs,updated_at) VALUES($1,$2,$3,now())
+		ON CONFLICT (org_id,server_id) DO UPDATE SET logs=EXCLUDED.logs,updated_at=now()`,
+		orgID, serverID, []byte(logs))
+	return err
+}
+
+func (p *Postgres) GetLogs(orgID, serverID string) (json.RawMessage, error) {
+	var b []byte
+	err := p.db.QueryRow(`SELECT logs FROM log_snapshots WHERE org_id=$1 AND server_id=$2`, orgID, serverID).Scan(&b)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return json.RawMessage(b), err
+}
+
 func (p *Postgres) SaveMetrics(orgID, serverID string, sample json.RawMessage) error {
 	_, err := p.db.Exec(`
 		INSERT INTO metric_samples(org_id,server_id,sample,updated_at) VALUES($1,$2,$3,now())

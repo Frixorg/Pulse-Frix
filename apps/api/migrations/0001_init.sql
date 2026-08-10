@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS discovery_snapshots (
     PRIMARY KEY (org_id, server_id)
 );
 
+-- Latest log batch per server (bounded tail per container, redacted).
+CREATE TABLE IF NOT EXISTS log_snapshots (
+    org_id     TEXT NOT NULL,
+    server_id  TEXT NOT NULL,
+    logs       JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, server_id)
+);
+
 CREATE TABLE IF NOT EXISTS metric_samples (
     org_id     TEXT NOT NULL,
     server_id  TEXT NOT NULL,

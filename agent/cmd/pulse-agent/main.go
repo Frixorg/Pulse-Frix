@@ -105,8 +105,10 @@ func main() {
 
 	discoveryTicker := time.NewTicker(cfg.DiscoveryEvery)
 	metricsTicker := time.NewTicker(cfg.MetricsEvery)
+	logsTicker := time.NewTicker(20 * time.Second)
 	defer discoveryTicker.Stop()
 	defer metricsTicker.Stop()
+	defer logsTicker.Stop()
 
 	for {
 		select {
@@ -116,6 +118,18 @@ func main() {
 
 		case <-discoveryTicker.C:
 			runDiscovery(ctx, logger, engine, client, stateDir)
+
+		case <-logsTicker.C:
+			if client != nil {
+				entries := discovery.CollectContainerLogs(ctx, cfg.DockerSocket, 40)
+				if len(entries) > 0 {
+					sendCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+					if err := client.Send(sendCtx, "logs", map[string]any{"entries": entries}); err != nil {
+						logger.Warn("logs send failed", "error", err)
+					}
+					cancel()
+				}
+			}
 
 		case <-metricsTicker.C:
 			sample := collector.Sample()

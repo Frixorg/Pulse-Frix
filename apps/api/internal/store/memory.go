@@ -27,6 +27,7 @@ type Memory struct {
 	agentByAID  map[string]string                 // agentID -> id
 	enrollments map[string]*model.EnrollmentToken // tokenHash -> token
 	discovery   map[string]json.RawMessage        // orgID/serverID -> snapshot
+	logs        map[string]json.RawMessage        // orgID/serverID -> latest log batch
 	metrics     map[string]json.RawMessage        // orgID/serverID -> sample
 	metricHist  map[string][]MetricSample         // orgID/serverID -> history
 	alerts      map[string]*model.Alert           // id -> alert
@@ -49,6 +50,7 @@ func NewMemory() *Memory {
 		agentByAID:  map[string]string{},
 		enrollments: map[string]*model.EnrollmentToken{},
 		discovery:   map[string]json.RawMessage{},
+		logs:        map[string]json.RawMessage{},
 		metrics:     map[string]json.RawMessage{},
 		metricHist:  map[string][]MetricSample{},
 		alerts:      map[string]*model.Alert{},
@@ -228,6 +230,7 @@ func (m *Memory) DeleteServer(orgID, id string) error {
 	}
 	delete(m.servers, id)
 	delete(m.discovery, key(orgID, s.ServerID))
+	delete(m.logs, key(orgID, s.ServerID))
 	delete(m.metrics, key(orgID, s.ServerID))
 	delete(m.metricHist, key(orgID, s.ServerID))
 	return nil
@@ -339,6 +342,23 @@ func (m *Memory) GetDiscovery(orgID, serverID string) (json.RawMessage, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	raw, ok := m.discovery[key(orgID, serverID)]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return raw, nil
+}
+
+func (m *Memory) SaveLogs(orgID, serverID string, logs json.RawMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logs[key(orgID, serverID)] = logs
+	return nil
+}
+
+func (m *Memory) GetLogs(orgID, serverID string) (json.RawMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	raw, ok := m.logs[key(orgID, serverID)]
 	if !ok {
 		return nil, ErrNotFound
 	}

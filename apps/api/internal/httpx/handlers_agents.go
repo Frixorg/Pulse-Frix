@@ -184,6 +184,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.SaveMetrics(agent.OrgID, agent.ServerID, env.Body)
 		_ = s.store.AppendMetricSample(agent.OrgID, agent.ServerID, now, env.Body)
 		_ = s.store.EnsureServer(agent.OrgID, agent.ServerID, "", now, model.HealthHealthy)
+	case "logs":
+		_ = s.store.SaveLogs(agent.OrgID, agent.ServerID, env.Body)
+		_ = s.store.EnsureServer(agent.OrgID, agent.ServerID, "", now, model.HealthHealthy)
 	case "heartbeat", "hello", "health":
 		_ = s.store.EnsureServer(agent.OrgID, agent.ServerID, "", now, model.HealthHealthy)
 	default:

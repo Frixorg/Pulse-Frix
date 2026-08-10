@@ -144,6 +144,17 @@ export interface MetricsResponse {
   note?: string;
 }
 
+export interface LogEntry {
+  source: string;
+  stream: string;
+  time: string;
+  message: string;
+}
+export interface LogsResponse {
+  sources: string[];
+  entries: LogEntry[];
+}
+
 export interface Topology {
   nodes: { id: string; label: string; type: string; health?: Health }[];
   edges: { from: string; to: string; source: string }[];

@@ -117,7 +117,7 @@ func analyzeAuthorizedKeys(root string) *model.Resource {
 	}
 
 	keyUsers := map[string]map[string]bool{}
-	any := false
+	seenAny := false
 	for user, path := range files {
 		for _, raw := range readLines(path) {
 			line := strings.TrimSpace(raw)
@@ -134,14 +134,14 @@ func analyzeAuthorizedKeys(root string) *model.Resource {
 			if blob == "" {
 				continue
 			}
-			any = true
+			seenAny = true
 			if keyUsers[blob] == nil {
 				keyUsers[blob] = map[string]bool{}
 			}
 			keyUsers[blob][user] = true
 		}
 	}
-	if !any {
+	if !seenAny {
 		return nil
 	}
 	var shared []string

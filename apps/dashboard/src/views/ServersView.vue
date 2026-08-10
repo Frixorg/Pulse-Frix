@@ -7,6 +7,7 @@ import type { Server } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
+import OnboardingConnect from "@/components/OnboardingConnect.vue";
 import { timeAgo } from "@/lib/format";
 
 const servers = useServersStore();
@@ -17,6 +18,7 @@ const target = ref<Server | null>(null);
 const removing = ref(false);
 const err = ref("");
 const copied = ref(false);
+const showAdd = ref(false);
 
 // Self-contained cleanup: removes only the Pulse agent + its data. Safe — it
 // never touches the user's own containers, networks, databases or config.
@@ -56,7 +58,16 @@ async function removeFromDashboard() {
     <PageHeader
       title="Servers"
       subtitle="Every VPS connected to Pulse. Removing one first cleans it off the VPS, then clears it from your dashboard."
-    />
+    >
+      <template #actions>
+        <button class="add-btn" @click="showAdd = true">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add server
+        </button>
+      </template>
+    </PageHeader>
     <EmptyState
       v-if="!loading && list.length === 0"
       title="No servers yet"
@@ -138,6 +149,17 @@ async function removeFromDashboard() {
         </div>
       </div>
     </div>
+
+    <!-- Add-server modal: generate a key + step-by-step commands. -->
+    <div v-if="showAdd" class="overlay" @click.self="showAdd = false">
+      <div class="modal wide">
+        <div class="modal-head">
+          <h2 class="modal-title">Add another server</h2>
+          <button class="x" aria-label="Close" @click="showAdd = false">✕</button>
+        </div>
+        <OnboardingConnect />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -208,6 +230,25 @@ async function removeFromDashboard() {
   border: 1px solid var(--pulse-border);
   box-shadow: var(--pulse-shadow);
   padding: 22px;
+}
+.modal.wide {
+  max-width: 720px;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+.add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--pulse-accent);
+  color: var(--pulse-accent-ink);
+  border: 0;
+  font-family: var(--pulse-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
 }
 .modal-head {
   display: flex;

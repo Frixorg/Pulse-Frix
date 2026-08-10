@@ -178,8 +178,14 @@ const features = [
 
     <footer class="foot">
       <div class="shell foot-in">
-        <span class="brand"><span class="brand-dot"></span> Pulse</span>
+        <span class="brand"><span class="brand-dot"></span> PulseFrix</span>
         <span class="foot-note">Observe first · Change nothing by default · GPL-3.0</span>
+        <a class="gh" href="https://github.com/Frixorg/Pulse-Frix" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.3.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5z"/>
+          </svg>
+          GitHub
+        </a>
       </div>
     </footer>
   </div>
@@ -310,6 +316,8 @@ const features = [
 .foot { position: relative; z-index: 2; border-top: 1px solid var(--line); margin-top: 40px; padding: 26px 0; }
 .foot-in { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .foot-note { font-size: 12px; color: var(--muted); }
+.gh { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--glass); color: var(--text); text-decoration: none; font-size: 13px; transition: background 0.15s, border-color 0.15s; }
+.gh:hover { background: var(--glass-2); border-color: rgba(199,245,66,0.4); }
 
 @media (max-width: 900px) {
   .shell-body { grid-template-columns: repeat(2, 1fr); }

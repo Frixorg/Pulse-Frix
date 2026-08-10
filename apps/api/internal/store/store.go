@@ -66,6 +66,8 @@ type Store interface {
 	// --- discovery & metrics (latest snapshot per server) ---
 	SaveDiscovery(orgID, serverID string, snapshot json.RawMessage) error
 	GetDiscovery(orgID, serverID string) (json.RawMessage, error)
+	SaveLogs(orgID, serverID string, logs json.RawMessage) error
+	GetLogs(orgID, serverID string) (json.RawMessage, error)
 	SaveMetrics(orgID, serverID string, sample json.RawMessage) error
 	GetMetrics(orgID, serverID string) (json.RawMessage, error)
 	// AppendMetricSample records a point in the append-only history; QueryMetricHistory

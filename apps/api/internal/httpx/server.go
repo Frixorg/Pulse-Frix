@@ -99,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/servers/{id}/domains", s.requirePerm(rbac.ServerRead, s.handleDomains))
 	mux.HandleFunc("GET /api/v1/servers/{id}/security", s.requirePerm(rbac.ServerRead, s.handleSecurity))
 	mux.HandleFunc("GET /api/v1/servers/{id}/metrics", s.requirePerm(rbac.ServerRead, s.handleMetrics))
+	mux.HandleFunc("GET /api/v1/servers/{id}/logs", s.requirePerm(rbac.ServerRead, s.handleLogs))
 
 	// Agents & enrollment
 	mux.HandleFunc("POST /api/v1/agents/enrollment-tokens", s.requirePerm(rbac.ServerManage, s.handleCreateEnrollment))

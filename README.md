@@ -1,196 +1,134 @@
 <div align="center">
 
-# Pulse
+# PulseFrix
 
-### Non-destructive VPS auto-discovery, monitoring & observability
+### Observe everything. Change nothing.
 
-**Install Pulse on any VPS and immediately understand everything running on it — without changing a thing.**
+**Non-destructive VPS auto-discovery, monitoring & observability.**
+Point PulseFrix at any server and, in seconds, see everything running on it — containers, databases, reverse proxies, domains, TLS, ports, processes, disks and traffic — monitored continuously, read-only, without touching a thing.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
-[![CI](https://img.shields.io/badge/CI-github--actions-brightgreen.svg)](./.github/workflows/ci.yml)
-[![Safety Model](https://img.shields.io/badge/safety-observe--first-success.svg)](./docs/SAFETY_MODEL.md)
+[![Made with Go](https://img.shields.io/badge/agent%20%2B%20api-Go-00ADD8.svg)](https://go.dev)
+[![Dashboard](https://img.shields.io/badge/dashboard-Vue%203%20%2B%20TS-42b883.svg)](https://vuejs.org)
+[![Safety](https://img.shields.io/badge/safety-observe--first-c7f542.svg)](./docs/SAFETY_MODEL.md)
 
 </div>
 
 ---
 
-## What is Pulse?
+## What is PulseFrix?
 
-Pulse is an **observability platform**, not a VPS management tool. You clone the
-repo onto an existing VPS, run one command, and receive a complete dashboard that
-**automatically discovers** your infrastructure — services, containers, reverse
-proxies, databases, processes, networking, storage, TLS certificates and domains —
-then continuously monitors them **as an additional layer** that never disrupts what
-is already running.
+PulseFrix is an **observability platform for a single VPS or a fleet of them**. You run one command on a server; a tiny Go **agent** inspects it read-only and streams what it finds to a dashboard. There is no manual configuration of what to watch — it's **auto-discovered**.
 
-Pulse runs in two modes that share the same agent and the same code:
+It runs in two modes that share the same agent and codebase:
 
 | Mode | Where the dashboard lives | Best for |
 |------|---------------------------|----------|
-| **Self-hosted** | On your own VPS, under your own domain | Full control, air-gapped, single machine |
-| **Pulse Cloud** | `pulse.frix.me`, your VPS connects out | Fleet view, many servers, zero inbound ports |
+| **PulseFrix Cloud** | Central dashboard; each VPS dials **out** | Many servers, zero inbound ports, sign in with Google/Telegram |
+| **Self-hosted** | The full stack on your own VPS + domain | One machine, full control, your data never leaves it |
+
+The agent is **outbound-only** in cloud mode — it opens **no inbound port** and every message it sends is signed with a per-agent key.
 
 ---
 
-## The safety model (read this first)
+## What PulseFrix actually *does* — and doesn't
 
-> **Pulse is designed as a non-destructive observability layer.**
->
-> It discovers and monitors existing infrastructure without replacing or
-> reconfiguring your applications. Existing configuration is **read-only by
-> default**. Any configuration change requires **explicit authorization**, is
-> **previewed as a diff**, **validated** before application, **backed up** before
-> modification, and is **rollback-capable**.
+Everything PulseFrix does is **read-only inspection**. It never starts, stops, edits or reconfigures your workloads.
 
-We do **not** claim "installation can never affect your VPS." Instead we enforce a
-formal [Safety Contract](./docs/SAFETY_MODEL.md): every install runs in three
-phases — **Discover → Plan → Apply** — and the default `SAFE MODE` never modifies a
-single existing service, container, config file, port, firewall rule or database.
+**It reads:**
 
-The 20 [Golden Rules](./docs/SAFETY_MODEL.md#golden-rules) are non-negotiable and
-enforced in code and CI.
+- **Docker** (socket, read-only): container list, state, image, live CPU/mem/net stats, ports, mounts, and — for the security view — `Privileged`, `IpcMode` and password-shaped env-var *names*.
+- **The OS** (`/proc`, `/sys`): CPU, load, memory, swap, disk usage (via the host rootfs), network interfaces and counters, uptime, processes and listening ports.
+- **Nginx** config (read-only): virtual hosts, `server_name`, listen/TLS, `proxy_pass` upstreams, and security directives (`add_header`, `server_tokens`, `limit_req`).
+- **TLS certs**: issuer, expiry and days-left for discovered domains.
+- **SSH** (`sshd_config`): `PermitRootLogin`, `PasswordAuthentication`, `PermitEmptyPasswords`, weak ciphers/MACs/KEX, and reused `authorized_keys`.
+- **Container logs** (read-only): the last lines per running container, to stream in the dashboard.
 
----
-
-## Quick start
-
-### Self-hosted
-
-```bash
-git clone https://github.com/frix-me/pulse.git
-cd pulse
-./installer/install.sh                 # discovers, shows a plan, asks before applying
-```
-
-Or the hosted convenience installer (still runs discovery + plan + confirmation —
-it never blindly executes privileged operations):
-
-```bash
-curl -fsSL https://install.frix.me/install.sh | bash
-```
-
-### Connect to Pulse Cloud
-
-```bash
-# 1. In the Pulse dashboard, generate a short-lived enrollment token
-# 2. On the VPS:
-./installer/install.sh --mode cloud --enrollment-token pst_xxx
-```
-
-The VPS makes an **outbound** TLS/WebSocket connection to the cloud. No inbound
-management port is ever required or opened.
+**It never:** modify a container, write to the Docker socket, edit Nginx/app config, open a firewall port, change SSH, or touch your databases. The install is **non-destructive by default** — see the [Safety Model](./docs/SAFETY_MODEL.md).
 
 ---
 
 ## What you get
 
-```text
-Dashboard   Overview: "Is my infrastructure healthy?" in ~5 seconds
-Servers     CPU / RAM / disk / network / uptime, historical graphs
-Services    Health engine: HEALTHY / DEGRADED / DOWN / UNKNOWN
-Containers  Live CPU/mem/net/IO, restarts, health, ports, mounts, redacted env
-Domains     DNS, HTTP(S) status, latency, TLS validity + expiry
-Network      Interfaces, connections, topology graph from real discovery
-Storage     Capacity, inodes, IOPS, retention, disk-pressure detection
-Databases   PostgreSQL / MySQL / Redis / MongoDB metrics via read-only checks
-Alerts      Debounced, deduplicated, dependency-aware, with recovery events
-Security    SSH exposure, public DB ports, weak/expired TLS, Docker exposure
-```
-
-Under the hood Pulse uses a **battle-tested monitoring stack** (Prometheus,
-node-exporter, cAdvisor, Alertmanager, Grafana) isolated on its own network — but
-users never need to understand Prometheus or Grafana. See [MONITORING.md](./docs/MONITORING.md).
+| Page | What it shows |
+|------|---------------|
+| **Dashboard** | "Is my machine healthy?" — health, CPU/RAM/disk/network/uptime, service & container counts, live CPU/memory charts, recent events |
+| **Containers** | Every container (running or not), image, state, live CPU/mem, ports, detected engine |
+| **Domains** | Vhosts from your reverse proxy — proxy target, TLS state + expiry, clickable to open |
+| **Databases** | Postgres, MySQL/MariaDB, Redis, Mongo, and more — detected by port **and container image** |
+| **Network** | Throughput chart, totals, primary interface, per-interface counters (noise filtered) |
+| **Storage** | Capacity donut, used/free, per-filesystem usage bars and inodes |
+| **Metrics** | CPU, memory, disk, network, load — **all at once**, live, drag-to-reorder, 1h→30d ranges, history |
+| **Logs** | Pick a container and **watch its logs live**; search, copy, and export — always escaped, never raw HTML |
+| **Alerts** | Define rules (metric threshold or container-down) with a for-duration + severity; live **pop-up** when one fires |
+| **Security** | A full read-only audit: exposure, TLS, base images, resource limits, **SSH hardening, privileged flag, blank/default credentials, shared SSH keys, shared memory, cipher suites, security headers, information leakage, rate limiting** — each with the exact resource, why it matters, and a fix. Re-run all or one check. |
 
 ---
 
-## Architecture at a glance
+## Quick start
 
-```text
-                       ┌───────────────────────────────────────┐
-                       │  Dashboard (Vue 3 + TS + Vite)         │
-                       └───────────────┬───────────────────────┘
-                                       │  REST + WebSocket
-                       ┌───────────────▼───────────────────────┐
-   Self-hosted ───────▶│  Pulse API (Go) — control plane        │
-   Cloud ─── outbound ▶│  auth · RBAC · multi-tenancy · audit   │
-                       └───────────────┬───────────────────────┘
-                                       │  agent protocol (versioned, signed)
-                       ┌───────────────▼───────────────────────┐
-                       │  Pulse Agent (Go, single binary)       │
-                       │  discovery · metrics · health · redact │
-                       └───────────────┬───────────────────────┘
-             read-only inspection ┌────┴────┬─────────┬─────────┐
-                                  ▼         ▼         ▼         ▼
-                               Docker      OS       Nginx    Databases
+### PulseFrix Cloud
+
+1. Sign in at your PulseFrix Cloud dashboard (Google or Telegram).
+2. Click **Add server** → generate a short-lived key.
+3. On the VPS you want to watch:
+
+```bash
+git clone https://github.com/Frixorg/Pulse-Frix.git pulse && cd pulse
+sudo PULSE_API_URL=https://<your-cloud> bash installer/install.sh \
+  --mode cloud --enrollment-token pst_xxx
 ```
 
-Full detail: [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+The agent dials out, enrolls, and your server appears automatically. No inbound port is opened.
+
+### Self-hosted
+
+```bash
+git clone https://github.com/Frixorg/Pulse-Frix.git pulse && cd pulse
+sudo bash installer/install.sh --mode local --domain pulse.example.com
+```
+
+The installer discovers your infrastructure read-only, shows a plan, then brings up the full stack (dashboard, API, PostgreSQL, monitoring) on an **isolated** Docker network — nothing existing is touched. It prints an admin email + password once; sign in at `https://pulse.example.com`.
 
 ---
 
-## Technology
+## Architecture
 
-| Layer | Choice |
-|-------|--------|
-| Agent | **Go** — single static binary, low footprint |
-| Backend API | **Go** — strongly typed control plane |
+```text
+   Vue 3 + TS dashboard  ──REST──▶  Pulse API (Go)  ──signed protocol──▶  Pulse Agent (Go)
+        (ECharts)                    auth · RBAC ·                          read-only discovery
+                                     multi-tenant · alerts                  + metrics + logs
+                                          │                                        │
+                                     PostgreSQL                         Docker · OS · Nginx · SSH
+                                     Prometheus-compatible
+```
+
+| Layer | Tech |
+|-------|------|
+| Agent & API | **Go** (single static binaries) |
 | Dashboard | **Vue 3 + TypeScript + Vite + Tailwind + ECharts** |
 | Control-plane DB | **PostgreSQL** |
-| Metrics | **Prometheus-compatible** (Prometheus + exporters) |
-| Visualization engine | **Grafana-compatible** (internal component) |
 | Deployment | **Docker Compose** |
 
----
-
-## Repository layout
-
-```text
-pulse/
-├── agent/           Go agent + discovery engine + `pulse` CLI
-├── apps/
-│   ├── api/         Go control-plane API
-│   └── dashboard/   Vue 3 dashboard
-├── packages/
-│   ├── protocol/    Shared agent↔server protocol (JSON schema)
-│   └── types/       Shared TypeScript types
-├── discovery/       Discovery reference specs & fixtures
-├── monitoring/      Prometheus / Grafana / exporters compose + configs
-├── installer/       Safe installer (discover → plan → apply) + uninstall
-├── infrastructure/  Dockerfiles, root compose, deploy helpers
-├── tests/           Non-destructive test suite + snapshot verifier
-├── docs/            Architecture, threat model, protocol, API, safety…
-├── examples/        Example environments & configs
-└── scripts/         Dev/build/release helper scripts
-```
+Repository layout: `agent/` (Go agent + detectors), `apps/api/` (Go control plane), `apps/dashboard/` (Vue), `installer/` (safe install/uninstall), `infrastructure/` (compose + `deploy.sh`), `docs/`.
 
 ---
 
-## Documentation
+## Safety model (read this first)
 
-- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — system design
-- [SAFETY_MODEL.md](./docs/SAFETY_MODEL.md) — the safety contract & golden rules
-- [THREAT_MODEL.md](./docs/THREAT_MODEL.md) — actors, threats, mitigations
-- [SECURITY.md](./SECURITY.md) — reporting & security posture
-- [DISCOVERY.md](./docs/DISCOVERY.md) — how detection works
-- [MONITORING.md](./docs/MONITORING.md) — the metrics stack
-- [AGENT_PROTOCOL.md](./docs/AGENT_PROTOCOL.md) — agent ↔ server protocol
-- [API.md](./docs/API.md) — REST API reference
-- [DATA_MODEL.md](./docs/DATA_MODEL.md) — entities & database schema
-- [DEPLOYMENT.md](./docs/DEPLOYMENT.md) — smoke test → self-hosted → cloud, step by step
-- [SELF_HOSTING.md](./docs/SELF_HOSTING.md) · [CLOUD_MODE.md](./docs/CLOUD_MODE.md)
-- [PRIVACY.md](./docs/PRIVACY.md) — exactly what data is collected
-- [INSTALL.md](./docs/INSTALL.md) · [TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md)
-- [DEVELOPMENT.md](./docs/DEVELOPMENT.md) · [CONTRIBUTING.md](./CONTRIBUTING.md)
-- [ROADMAP.md](./docs/ROADMAP.md) — phased delivery plan
+Every install runs **Discover → Plan → Apply**, and the default **SAFE MODE** never modifies an existing service, container, config file, port, firewall rule or database. Removing a monitored server never touches the VPS; a self-contained cleanup command removes only the agent. See the [Safety Model & Golden Rules](./docs/SAFETY_MODEL.md).
 
 ---
 
-## Project status
+## Contributing
 
-Pulse is under active development. See [ROADMAP.md](./docs/ROADMAP.md) for the
-phased plan and [the acceptance criteria](./docs/SAFETY_MODEL.md#acceptance-criteria)
-that gate "done."
+Contributions are welcome. Good first steps:
+
+1. Read [CONTRIBUTING.md](./CONTRIBUTING.md) and [DEVELOPMENT.md](./docs/DEVELOPMENT.md).
+2. Run the stack locally with Docker Compose (`infrastructure/`).
+3. The agent is stdlib-only Go (no external deps) so it always builds; the API uses `-tags pgx` for PostgreSQL.
+4. Open an issue describing the change before large PRs.
 
 ## License
 
-[GPL-3.0](./LICENSE). Pulse is open source and intended for public deployment.
+[GPL-3.0](./LICENSE). PulseFrix is open source and intended for public deployment.

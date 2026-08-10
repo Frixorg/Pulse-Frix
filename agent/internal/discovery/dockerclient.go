@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -23,7 +24,7 @@ type dockerClient struct {
 // set of endpoints Pulse uses. All are read-only. See SECURITY.md.
 var DockerAllowedPaths = []string{
 	"/version", "/info",
-	"/containers/json", "/containers/*/json", "/containers/*/stats",
+	"/containers/json", "/containers/*/json", "/containers/*/stats", "/containers/*/logs",
 	"/networks", "/volumes", "/images/json",
 }
 
@@ -157,6 +158,28 @@ func (c *dockerClient) inspect(ctx context.Context, id string) (dockerInspect, e
 	var di dockerInspect
 	err := c.get(ctx, "/containers/"+id+"/json", &di)
 	return di, err
+}
+
+// getRaw fetches a non-JSON body (used for the multiplexed logs stream).
+func (c *dockerClient) getRaw(ctx context.Context, path string) ([]byte, error) {
+	url := "http://unix/" + c.apiVer + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("docker api %s: status %d", path, resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+}
+
+func (c *dockerClient) logs(ctx context.Context, id string, tail int) ([]byte, error) {
+	return c.getRaw(ctx, fmt.Sprintf("/containers/%s/logs?stdout=1&stderr=1&timestamps=1&tail=%d", id, tail))
 }
 
 // cpuPercent computes CPU usage percentage from two stat samples (as Docker CLI does).

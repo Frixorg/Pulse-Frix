@@ -12,6 +12,7 @@ import type {
   AlertInstance,
   EventItem,
   MetricsResponse,
+  LogsResponse,
   Topology,
   DetectorResult,
   Page,
@@ -74,6 +75,13 @@ export const api = {
   topology: (id: string) => request<Topology>(`/servers/${id}/topology`),
   metrics: (id: string, query: string, range: string) =>
     request<MetricsResponse>(`/servers/${id}/metrics?query=${encodeURIComponent(query)}&range=${range}`),
+  logs: (id: string, source?: string, q?: string) => {
+    const params = new URLSearchParams();
+    if (source) params.set("source", source);
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return request<LogsResponse>(`/servers/${id}/logs${qs ? `?${qs}` : ""}`);
+  },
 
   // alerts / events
   alerts: () => request<Page<Alert>>("/alerts"),

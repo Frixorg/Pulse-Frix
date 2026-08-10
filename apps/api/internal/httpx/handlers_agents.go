@@ -175,17 +175,17 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC()
 	switch env.Type {
 	case "discovery":
 		_ = s.store.SaveDiscovery(agent.OrgID, agent.ServerID, env.Body)
-		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, time.Now().UTC(), model.HealthHealthy)
+		_ = s.store.EnsureServer(agent.OrgID, agent.ServerID, hostnameFromSnapshot(env.Body), now, model.HealthHealthy)
 	case "metrics":
-		now := time.Now().UTC()
 		_ = s.store.SaveMetrics(agent.OrgID, agent.ServerID, env.Body)
 		_ = s.store.AppendMetricSample(agent.OrgID, agent.ServerID, now, env.Body)
-		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, now, model.HealthHealthy)
+		_ = s.store.EnsureServer(agent.OrgID, agent.ServerID, "", now, model.HealthHealthy)
 	case "heartbeat", "hello", "health":
-		_ = s.store.TouchServerSeen(agent.OrgID, agent.ServerID, time.Now().UTC(), model.HealthHealthy)
+		_ = s.store.EnsureServer(agent.OrgID, agent.ServerID, "", now, model.HealthHealthy)
 	default:
 		Fail(w, r, http.StatusBadRequest, CodeValidation, "unknown message type")
 		return
@@ -241,4 +241,14 @@ func absDuration(d time.Duration) time.Duration {
 		return -d
 	}
 	return d
+}
+
+// hostnameFromSnapshot pulls the hostname out of a discovery snapshot body so a
+// self-healed server row can carry a friendly name.
+func hostnameFromSnapshot(b json.RawMessage) string {
+	var s struct {
+		Hostname string `json:"hostname"`
+	}
+	_ = json.Unmarshal(b, &s)
+	return s.Hostname
 }

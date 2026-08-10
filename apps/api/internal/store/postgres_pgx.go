@@ -252,6 +252,18 @@ func (p *Postgres) TouchServerSeen(orgID, serverID string, now time.Time, status
 	return err
 }
 
+func (p *Postgres) EnsureServer(orgID, serverID, hostname string, now time.Time, status model.Health) error {
+	_, err := p.db.Exec(`
+		INSERT INTO servers(id,org_id,server_id,hostname,mode,status,last_seen_at,created_at)
+		VALUES($1,$2,$3,NULLIF($4,''),'cloud',$5,$6,now())
+		ON CONFLICT (org_id,server_id) DO UPDATE SET
+		  hostname=COALESCE(NULLIF(EXCLUDED.hostname,''), servers.hostname),
+		  status=EXCLUDED.status,
+		  last_seen_at=EXCLUDED.last_seen_at`,
+		auth.NewID("srv"), orgID, serverID, hostname, status, now)
+	return err
+}
+
 func (p *Postgres) CreateEnrollmentToken(t *model.EnrollmentToken) error {
 	_, err := p.db.Exec(`INSERT INTO enrollment_tokens(org_id,token_hash,expires_at,fingerprint,created_at) VALUES($1,$2,$3,$4,now())`,
 		t.OrgID, t.TokenHash, t.ExpiresAt, t.Fingerprint)

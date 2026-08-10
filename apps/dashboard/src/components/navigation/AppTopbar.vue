@@ -1,28 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
 import { useServersStore } from "@/stores/servers";
 
 const servers = useServersStore();
-const confirming = ref(false);
-const removing = ref(false);
-const err = ref("");
-
-const current = computed(() => servers.selected);
-
-async function remove() {
-  const id = servers.selectedId;
-  if (!id) return;
-  removing.value = true;
-  err.value = "";
-  try {
-    await servers.remove(id);
-    confirming.value = false;
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : "failed to remove";
-  } finally {
-    removing.value = false;
-  }
-}
 </script>
 
 <template>
@@ -42,18 +21,6 @@ async function remove() {
         <span class="count">{{ servers.list.length }} connected</span>
       </template>
       <span v-else class="muted">No servers yet</span>
-    </div>
-
-    <div v-if="current" class="right">
-      <span v-if="err" class="err">{{ err }}</span>
-      <button v-if="!confirming" class="btn btn-danger" @click="confirming = true">Remove server</button>
-      <template v-else>
-        <span class="confirm-q">Remove “{{ current.hostname || current.server_id }}”?</span>
-        <button class="btn btn-glass" :disabled="removing" @click="confirming = false">Cancel</button>
-        <button class="btn btn-danger" :disabled="removing" @click="remove">
-          {{ removing ? "Removing…" : "Confirm" }}
-        </button>
-      </template>
     </div>
   </header>
 </template>
@@ -98,17 +65,5 @@ async function remove() {
 .muted {
   font-size: 13px;
   color: var(--pulse-text-muted);
-}
-.right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.confirm-q {
-  font-size: 13px;
-}
-.err {
-  font-size: 12px;
-  color: var(--pulse-down);
 }
 </style>

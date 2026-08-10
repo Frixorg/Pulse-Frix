@@ -246,6 +246,27 @@ func (m *Memory) TouchServerSeen(orgID, serverID string, now time.Time, status m
 	return ErrNotFound
 }
 
+func (m *Memory) EnsureServer(orgID, serverID, hostname string, now time.Time, status model.Health) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.servers {
+		if s.OrgID == orgID && s.ServerID == serverID {
+			s.LastSeenAt = now
+			s.Status = status
+			if hostname != "" {
+				s.Hostname = hostname
+			}
+			return nil
+		}
+	}
+	srv := &model.Server{
+		ID: auth.NewID("srv"), OrgID: orgID, ServerID: serverID, Hostname: hostname,
+		Mode: "cloud", Status: status, LastSeenAt: now, CreatedAt: now,
+	}
+	m.servers[srv.ID] = srv
+	return nil
+}
+
 func (m *Memory) CreateEnrollmentToken(t *model.EnrollmentToken) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

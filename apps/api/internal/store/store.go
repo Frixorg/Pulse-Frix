@@ -52,6 +52,10 @@ type Store interface {
 	UpsertServer(orgID string, s *model.Server) error
 	DeleteServer(orgID, id string) error
 	TouchServerSeen(orgID, serverID string, now time.Time, status model.Health) error
+	// EnsureServer creates the server row if it's missing, otherwise refreshes
+	// last-seen/status — so a live, enrolled agent always has a visible server
+	// even if the server was removed. hostname is applied only when non-empty.
+	EnsureServer(orgID, serverID, hostname string, now time.Time, status model.Health) error
 
 	CreateEnrollmentToken(t *model.EnrollmentToken) error
 	ConsumeEnrollmentToken(hash string, now time.Time) (*model.EnrollmentToken, error)

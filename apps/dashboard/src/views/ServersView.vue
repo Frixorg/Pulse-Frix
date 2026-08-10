@@ -27,6 +27,8 @@ async function remove(id: string) {
   try {
     await servers.remove(id);
     confirmId.value = null;
+    // Back to onboarding when nothing is left to show.
+    if (servers.list.length === 0) router.push({ name: "dashboard" });
   } catch (e) {
     err.value = e instanceof Error ? e.message : "failed to remove";
   } finally {
@@ -68,12 +70,18 @@ async function remove(id: string) {
             <td class="text-right whitespace-nowrap" @click.stop>
               <template v-if="confirmId === s.id">
                 <span class="text-xs text-muted mr-2">Remove this server?</span>
-                <button class="btn btn-glass btn-xs" :disabled="removingId === s.id" @click="confirmId = null">Cancel</button>
-                <button class="btn btn-danger btn-xs ml-1" :disabled="removingId === s.id" @click="remove(s.id)">
+                <button class="rm-btn" :disabled="removingId === s.id" @click="confirmId = null">Cancel</button>
+                <button class="rm-btn rm-confirm" :disabled="removingId === s.id" @click="remove(s.id)">
                   {{ removingId === s.id ? "Removing…" : "Confirm" }}
                 </button>
               </template>
-              <button v-else class="btn btn-danger btn-xs" @click="confirmId = s.id">Remove</button>
+              <button v-else class="rm-btn rm-danger" @click="confirmId = s.id">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                  <path d="M10 11v6M14 11v6" />
+                </svg>
+                Remove
+              </button>
             </td>
           </tr>
         </tbody>
@@ -91,8 +99,44 @@ async function remove(id: string) {
 .row:hover {
   background: var(--pulse-surface-2);
 }
-.btn-xs {
-  padding: 5px 10px;
+.rm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 9px;
   font-size: 12px;
+  font-family: var(--pulse-font-mono);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--pulse-border);
+  color: var(--pulse-text-muted);
+  transition: all 0.14s;
+}
+.rm-btn:hover {
+  color: var(--pulse-text);
+  border-color: var(--pulse-text-muted);
+}
+.rm-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rm-danger {
+  color: #fca5a5;
+  border-color: transparent;
+}
+.rm-danger:hover {
+  color: #fecaca;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+.rm-confirm {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.4);
+  margin-left: 4px;
+}
+.rm-confirm:hover {
+  background: rgba(248, 113, 113, 0.24);
 }
 </style>

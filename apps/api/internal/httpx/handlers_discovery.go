@@ -3,6 +3,7 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -133,7 +134,74 @@ func (s *Server) handleDatabases(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "no databases discovered yet")
 		return
 	}
-	JSON(w, http.StatusOK, Page{Data: s.resourcesOfType(snap, "database")})
+	out := s.resourcesOfType(snap, "database")
+	seen := map[string]bool{}
+	for _, d := range out {
+		seen[strings.ToLower(d.Name)] = true
+	}
+	// Also derive databases from Docker container images — this covers
+	// containerised engines on any (or no published) port, which the
+	// host-port detector alone misses.
+	for _, c := range s.resourcesOfType(snap, "docker_container") {
+		image, _ := c.Attributes["image"].(string)
+		engine := dbEngineFromImage(image)
+		if engine == "" || seen[strings.ToLower(c.Name)] {
+			continue
+		}
+		seen[strings.ToLower(c.Name)] = true
+		attrs := map[string]any{"engine": engine, "image": image, "container": c.Name, "exposure": "container"}
+		if len(c.Ports) > 0 {
+			attrs["port"] = c.Ports[0].Host
+		}
+		out = append(out, agentResource{
+			Type: "database", ID: "dbc:" + c.Name, Name: c.Name,
+			Status: c.Status, Health: c.Health, DetectedBy: "docker",
+			Ports: c.Ports, Attributes: attrs,
+		})
+	}
+	if out == nil {
+		out = []agentResource{}
+	}
+	JSON(w, http.StatusOK, Page{Data: out})
+}
+
+// dbEngineFromImage maps a Docker image reference to a database engine, or "".
+func dbEngineFromImage(image string) string {
+	img := strings.ToLower(image)
+	switch {
+	case strings.Contains(img, "postgres"), strings.Contains(img, "pgvector"),
+		strings.Contains(img, "timescale"), strings.Contains(img, "postgis"):
+		return "postgresql"
+	case strings.Contains(img, "mariadb"):
+		return "mariadb"
+	case strings.Contains(img, "mysql"), strings.Contains(img, "percona"):
+		return "mysql"
+	case strings.Contains(img, "valkey"), strings.Contains(img, "keydb"), strings.Contains(img, "redis"):
+		return "redis"
+	case strings.Contains(img, "mongo"):
+		return "mongodb"
+	case strings.Contains(img, "memcached"):
+		return "memcached"
+	case strings.Contains(img, "opensearch"), strings.Contains(img, "elasticsearch"):
+		return "elasticsearch"
+	case strings.Contains(img, "clickhouse"):
+		return "clickhouse"
+	case strings.Contains(img, "cockroach"):
+		return "cockroachdb"
+	case strings.Contains(img, "scylla"), strings.Contains(img, "cassandra"):
+		return "cassandra"
+	case strings.Contains(img, "influxdb"):
+		return "influxdb"
+	case strings.Contains(img, "rabbitmq"):
+		return "rabbitmq"
+	case strings.Contains(img, "neo4j"):
+		return "neo4j"
+	case strings.Contains(img, "couchdb"):
+		return "couchdb"
+	case strings.Contains(img, "surrealdb"):
+		return "surrealdb"
+	}
+	return ""
 }
 
 func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {

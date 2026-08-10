@@ -2,6 +2,9 @@
 import { ref, onMounted } from "vue";
 
 const isLight = ref(false);
+const props = defineProps({
+  showLabel: { type: Boolean, default: true },
+});
 
 function apply(light: boolean) {
   const root = document.documentElement;
@@ -46,7 +49,7 @@ onMounted(() => {
       </svg>
       <span class="knob"></span>
     </span>
-    <span class="switch-label">{{ isLight ? "Light" : "Dark" }}</span>
+    <span class="switch-label" v-if="showLabel">{{ isLight ? "Light" : "Dark" }}</span>
   </button>
 </template>
 

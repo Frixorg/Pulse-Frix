@@ -6,8 +6,8 @@ import { api } from "@/api/client";
 <template>
   <ResourceListView
     title="Databases"
-    subtitle="Detected via listening ports and read-only reachability checks. Pulse never modifies database configuration."
+    subtitle="Postgres, MySQL/MariaDB, Redis, Mongo and more — found by listening ports and container images. Pulse never modifies database configuration."
     :loader="api.databases"
-    :attr-keys="['engine', 'exposure']"
+    :attr-keys="['engine', 'image', 'exposure']"
   />
 </template>

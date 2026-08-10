@@ -62,9 +62,13 @@ export interface Resource {
 
 export interface DomainView {
   fqdn: string;
+  url: string;
   tls: boolean;
+  ssl: boolean;
   tls_days_left?: number;
   tls_expires_at?: string;
+  upstream?: string;
+  ports?: string[];
   health: Health;
   source: string;
 }

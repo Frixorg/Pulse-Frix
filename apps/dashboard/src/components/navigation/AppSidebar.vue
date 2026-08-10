@@ -12,7 +12,6 @@ const router = useRouter();
 // Navigation mirrors docs/UI_IA.md. Settings + account live in the footer.
 const nav: { name: string; label: string }[] = [
   { name: "dashboard", label: "Dashboard" },
-  { name: "servers", label: "Servers" },
   { name: "services", label: "Services" },
   { name: "containers", label: "Containers" },
   { name: "applications", label: "Applications" },
@@ -26,6 +25,8 @@ const nav: { name: string; label: string }[] = [
   { name: "infrastructure", label: "Infrastructure" },
   { name: "security", label: "Security" },
   { name: "integrations", label: "Integrations" },
+  // Servers sits at the bottom of the nav, just above Settings in the footer.
+  { name: "servers", label: "Servers" },
 ];
 
 // Until the first server connects, keep the nav focused on getting set up.
@@ -69,7 +70,7 @@ async function logout() {
 
       <div class="foot-row">
         <span class="foot-k">Appearance</span>
-        <ThemeToggle />
+        <ThemeToggle :show-label="false"/>
       </div>
 
       <div class="profile">

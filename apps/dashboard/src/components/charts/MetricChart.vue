@@ -17,7 +17,16 @@ const props = defineProps<{
 const el = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 
-const PALETTE = ["#c7f542", "#38bdf8", "#fbbf24", "#f87171", "#a78bfa"];
+// Bright on dark; deeper + saturated on light so lines don't wash out on a
+// white surface. Same hue order (lime, blue, amber, red, violet) in both.
+const DARK_PALETTE = ["#c7f542", "#38bdf8", "#fbbf24", "#f87171", "#a78bfa"];
+const LIGHT_PALETTE = ["#4d7c0f", "#0369a1", "#b45309", "#b91c1c", "#6d28d9"];
+function isLight() {
+  return document.documentElement.classList.contains("light");
+}
+function palette() {
+  return isLight() ? LIGHT_PALETTE : DARK_PALETTE;
+}
 
 function css(name: string, fallback = "") {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -82,9 +91,10 @@ function render() {
     return;
   }
 
+  const pal = palette();
   const legend = props.names && props.names.length > 1;
   const chartSeries = props.series.map((s, idx) => {
-    const c = PALETTE[idx % PALETTE.length];
+    const c = props.color && props.series.length === 1 ? props.color : pal[idx % pal.length];
     const base: Record<string, unknown> = {
       name: props.names?.[idx] ?? s.name,
       type: props.type === "bar" ? "bar" : "line",
@@ -141,10 +151,12 @@ onMounted(() => {
     chart = echarts.init(el.value);
     render();
     window.addEventListener("resize", resize);
+    window.addEventListener("pulse-theme", render);
   }
 });
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
+  window.removeEventListener("pulse-theme", render);
   chart?.dispose();
 });
 watch(() => [props.series, props.min, props.max, props.unit, props.type], render, { deep: true });

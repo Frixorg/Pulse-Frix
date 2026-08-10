@@ -7,6 +7,7 @@ func DefaultDetectors() []Detector {
 	return []Detector{
 		OSDetector{},
 		DockerDetector{},
+		&DockerStorageDetector{},
 		NginxDetector{},
 		SystemdDetector{},
 		PortDetector{},

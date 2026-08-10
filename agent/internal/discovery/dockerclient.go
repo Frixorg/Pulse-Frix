@@ -25,7 +25,7 @@ type dockerClient struct {
 var DockerAllowedPaths = []string{
 	"/version", "/info",
 	"/containers/json", "/containers/*/json", "/containers/*/stats", "/containers/*/logs",
-	"/networks", "/volumes", "/images/json",
+	"/networks", "/volumes", "/images/json", "/system/df",
 }
 
 func newDockerClient(socket string) *dockerClient {

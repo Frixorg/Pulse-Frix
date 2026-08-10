@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useAuthStore } from "@/stores/auth";
+import ThemeToggle from "@/components/ThemeToggle.vue";
 
 const auth = useAuthStore();
 const isAuthed = computed(() => auth.isAuthenticated);
@@ -47,6 +48,7 @@ const features = [
           <a href="#modes">Modes</a>
           <a href="#start">Get started</a>
         </nav>
+        <ThemeToggle :show-label="false" />
         <RouterLink v-if="isAuthed" to="/app" class="btn btn-lime">Dashboard</RouterLink>
         <RouterLink v-else to="/login" class="btn btn-ghost-glass">Sign in</RouterLink>
       </div>
@@ -207,6 +209,64 @@ const features = [
   color: var(--text);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   overflow-x: hidden;
+}
+
+/* Light theme — same lime identity on a bright surface. The platform defaults
+   to dark; this only applies when the user toggles light (html.light). */
+:global(html.light) .lp {
+  --ink: #eef1f6;
+  --ink2: #e6eaf1;
+  --lime: #4d7c0f; /* deeper lime so accents/text stay legible on white */
+  --text: #12161f;
+  --muted: #566072;
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-2: rgba(255, 255, 255, 0.92);
+  --line: rgba(15, 20, 30, 0.12);
+}
+:global(html.light) .nav {
+  background: rgba(238, 241, 246, 0.72);
+}
+:global(html.light) .btn-lime {
+  color: #f4ffd6;
+  box-shadow: 0 0 0 1px rgba(77, 124, 15, 0.5), 0 8px 24px rgba(77, 124, 15, 0.2);
+}
+:global(html.light) .grad {
+  background: linear-gradient(100deg, #4d7c0f, #6ea01a 55%, #4d7c0f);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+:global(html.light) .float-shell {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.7));
+  box-shadow: 0 30px 80px rgba(15, 20, 30, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+:global(html.light) .shell-bar {
+  background: rgba(15, 20, 30, 0.03);
+}
+:global(html.light) .bar {
+  background: rgba(15, 20, 30, 0.08);
+}
+:global(html.light) .badge,
+:global(html.light) .mode-tag.lime {
+  background: rgba(77, 124, 15, 0.1);
+  border-color: rgba(77, 124, 15, 0.35);
+}
+:global(html.light) .step-n {
+  background: rgba(77, 124, 15, 0.1);
+  border-color: rgba(77, 124, 15, 0.35);
+}
+:global(html.light) .lp-grid {
+  background-image:
+    linear-gradient(rgba(15, 20, 30, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 20, 30, 0.05) 1px, transparent 1px);
+}
+:global(html.light) .lp-grain {
+  opacity: 0.025;
+}
+:global(html.light) .lp-glow-a {
+  background: radial-gradient(circle, rgba(120, 170, 20, 0.18), transparent 70%);
+}
+:global(html.light) .lp-glow-b {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.12), transparent 70%);
 }
 /* atmosphere */
 .lp-grid {

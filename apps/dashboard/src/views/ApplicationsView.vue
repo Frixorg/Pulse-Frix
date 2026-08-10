@@ -5,8 +5,8 @@ import { api } from "@/api/client";
 
 <template>
   <ResourceListView
-    title="Applications"
-    subtitle="Heuristically detected runtimes and frameworks. Detection never modifies application files."
+    title="Runtimes"
+    subtitle="Language runtimes and app frameworks detected from running processes (Node.js, PHP, Python…). Detection is read-only and never modifies application files."
     :loader="api.applications"
     :attr-keys="['process_count', 'signal']"
   />

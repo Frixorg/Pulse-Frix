@@ -15,6 +15,8 @@ function apply(light: boolean) {
   } catch {
     /* ignore */
   }
+  // Let canvas-based views (ECharts) re-render with a theme-appropriate palette.
+  window.dispatchEvent(new Event("pulse-theme"));
 }
 
 function toggle() {

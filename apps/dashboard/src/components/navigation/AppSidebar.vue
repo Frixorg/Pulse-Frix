@@ -16,7 +16,7 @@ const nav: { name: string; label: string }[] = [
   { name: "dashboard", label: "Dashboard" },
   { name: "services", label: "Services" },
   { name: "containers", label: "Containers" },
-  { name: "applications", label: "Applications" },
+  { name: "runtimes", label: "Runtimes" },
   { name: "domains", label: "Domains" },
   { name: "network", label: "Network" },
   { name: "storage", label: "Storage" },

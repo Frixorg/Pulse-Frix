@@ -22,7 +22,7 @@ const RANGE_MS: Record<string, number> = {
   "30d": 30 * 24 * 3600e3,
 };
 
-const range = ref("6h");
+const range = ref("1h");
 const order = ref<string[]>(loadOrder());
 const data = ref<Record<string, { series: MetricSeries[]; degraded: boolean }>>({});
 const now = ref(Date.now());

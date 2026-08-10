@@ -1,8 +1,10 @@
 package httpx
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // domainView is the shape returned for /servers/{id}/domains.
@@ -80,10 +82,22 @@ func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request) {
 
 // securityFinding is a read-only risk observation. Pulse never auto-remediates.
 type securityFinding struct {
-	Severity       string `json:"severity"`
+	ID             string `json:"id"`
+	Category       string `json:"category"`
+	Severity       string `json:"severity"` // CRITICAL | WARNING | INFO
 	Title          string `json:"title"`
+	Resource       string `json:"resource,omitempty"`
 	Detail         string `json:"detail"`
 	Recommendation string `json:"recommendation"`
+}
+
+// securityCheck is one category in the audit catalogue with its outcome.
+type securityCheck struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"` // pass | issues | not_assessed
+	Count  int    `json:"count"`
+	Note   string `json:"note,omitempty"`
 }
 
 func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
@@ -95,57 +109,170 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var findings []securityFinding
+	issues := map[string]int{}
+	flag := func(cat string, f securityFinding) {
+		f.Category = cat
+		findings = append(findings, f)
+		issues[cat]++
+	}
 
-	// Publicly-exposed databases.
+	// Localhost isolation — databases reachable on all interfaces.
 	for _, db := range s.resourcesOfType(snap, "database") {
 		if expo, _ := db.Attributes["exposure"].(string); expo == "public" {
-			findings = append(findings, securityFinding{
-				Severity:       "CRITICAL",
-				Title:          db.Name + " is publicly reachable",
-				Detail:         db.Name + " is listening on all interfaces.",
-				Recommendation: "Restrict access to trusted networks or bind to loopback.",
+			flag("localhost-isolation", securityFinding{
+				ID: "db-public-" + db.Name, Severity: "CRITICAL",
+				Title:          db.Name + " is reachable from outside the host",
+				Resource:       db.Name,
+				Detail:         "This database listens on all interfaces (0.0.0.0), so anything that can reach the host can attempt to connect.",
+				Recommendation: "Bind it to 127.0.0.1 or an internal Docker network and reach it through your app — never publish the DB port.",
 			})
 		}
 	}
 
-	// Docker daemon exposed on a TCP port.
+	// Port exposure + Docker daemon exposure.
 	for _, port := range s.resourcesOfType(snap, "listening_port") {
 		if len(port.Ports) == 0 {
 			continue
 		}
-		pp := port.Ports[0]
-		if expo, _ := port.Attributes["exposure"].(string); expo == "public" {
-			if pp.Host == 2375 || pp.Host == 2376 {
-				findings = append(findings, securityFinding{
-					Severity:       "CRITICAL",
-					Title:          "Docker daemon exposed",
-					Detail:         "The Docker API is listening publicly — this is root-equivalent access.",
-					Recommendation: "Never expose the Docker socket/port publicly.",
+		if expo, _ := port.Attributes["exposure"].(string); expo != "public" {
+			continue
+		}
+		host := port.Ports[0].Host
+		switch host {
+		case 2375, 2376:
+			flag("docker-exposure", securityFinding{
+				ID: "docker-daemon", Severity: "CRITICAL",
+				Title:          "Docker daemon exposed on the network",
+				Resource:       fmt.Sprintf("tcp/%d", host),
+				Detail:         "The Docker API is listening publicly — this is root-equivalent access to the whole host.",
+				Recommendation: "Never expose the Docker socket/port. Use SSH or a read-only socket proxy.",
+			})
+		default:
+			if host != 80 && host != 443 && host != 22 && host != 0 {
+				flag("port-exposure", securityFinding{
+					ID: fmt.Sprintf("port-%d", host), Severity: "WARNING",
+					Title:          fmt.Sprintf("Port %d is exposed publicly", host),
+					Resource:       fmt.Sprintf("%s · tcp/%d", port.Name, host),
+					Detail:         "This port is listening on all interfaces. If it isn't meant to be public, it widens your attack surface.",
+					Recommendation: "Bind it to loopback, or restrict it with a firewall / security group.",
 				})
 			}
 		}
 	}
 
-	// Expiring / expired TLS.
+	// TLS validity.
 	for _, cert := range s.resourcesOfType(snap, "tls_certificate") {
 		days, _ := cert.Attributes["days_left"].(float64)
 		if days < 0 {
-			findings = append(findings, securityFinding{
-				Severity: "CRITICAL", Title: "Expired TLS certificate: " + cert.Name,
-				Detail: "The certificate has expired.", Recommendation: "Renew the certificate.",
+			flag("tls-validity", securityFinding{
+				ID: "tls-expired-" + cert.Name, Severity: "CRITICAL",
+				Title: "Expired TLS certificate: " + cert.Name, Resource: cert.Name,
+				Detail: "The certificate has expired; clients will reject the connection.",
+				Recommendation: "Renew it (e.g. certbot renew) and reload the reverse proxy.",
 			})
 		} else if days < 30 {
-			findings = append(findings, securityFinding{
-				Severity: "WARNING", Title: "TLS certificate expiring soon: " + cert.Name,
-				Detail: "Fewer than 30 days remain.", Recommendation: "Renew the certificate before expiry.",
+			flag("tls-validity", securityFinding{
+				ID: "tls-expiring-" + cert.Name, Severity: "WARNING",
+				Title: "TLS certificate expiring soon: " + cert.Name, Resource: cert.Name,
+				Detail:         fmt.Sprintf("Fewer than 30 days remain (%d).", int(days)),
+				Recommendation: "Confirm auto-renewal is working, or renew now.",
 			})
 		}
+	}
+
+	// Base image hygiene — unpinned :latest / untagged images.
+	unpinned := 0
+	for _, c := range s.resourcesOfType(snap, "docker_container") {
+		img, _ := c.Attributes["image"].(string)
+		if img == "" {
+			continue
+		}
+		if strings.HasSuffix(img, ":latest") || !strings.Contains(img, ":") {
+			unpinned++
+			if unpinned <= 6 {
+				flag("base-image", securityFinding{
+					ID: "img-" + c.Name, Severity: "INFO",
+					Title: "Unpinned image: " + img, Resource: c.Name,
+					Detail:         "Using :latest (or no tag) means the image can change silently and may carry unpatched CVEs.",
+					Recommendation: "Pin a specific version tag and scan images (e.g. trivy) in CI.",
+				})
+			}
+		}
+	}
+	if unpinned > 6 {
+		flag("base-image", securityFinding{
+			ID: "img-more", Severity: "INFO",
+			Title:          fmt.Sprintf("%d containers run unpinned images", unpinned),
+			Detail:         "Several containers use :latest or untagged images.",
+			Recommendation: "Pin versions and add image scanning to your build.",
+		})
+	}
+
+	// Resource boundaries — running containers with no memory limit.
+	noLimit := 0
+	for _, c := range s.resourcesOfType(snap, "docker_container") {
+		if c.Status != "running" {
+			continue
+		}
+		if lim, _ := c.Attributes["memory_limit"].(float64); lim == 0 {
+			noLimit++
+		}
+	}
+	if noLimit > 0 {
+		flag("resource-boundaries", securityFinding{
+			ID: "no-mem-limit", Severity: "INFO",
+			Title:          fmt.Sprintf("%d running containers have no memory limit", noLimit),
+			Detail:         "Without a limit, one container can exhaust host memory (a noisy-neighbour / DoS risk).",
+			Recommendation: "Set a memory limit per service (mem_limit / deploy.resources.limits).",
+		})
 	}
 
 	if findings == nil {
 		findings = []securityFinding{}
 	}
-	JSON(w, http.StatusOK, Page{Data: findings})
+	JSON(w, http.StatusOK, map[string]any{
+		"generated_at": time.Now().UTC(),
+		"checks":       buildSecurityChecks(issues),
+		"findings":     findings,
+	})
+}
+
+// buildSecurityChecks returns the full audit catalogue. Assessed categories carry
+// a pass/issues status; the rest are marked not-assessed until deeper host
+// inspection lands in the agent.
+func buildSecurityChecks(issues map[string]int) []securityCheck {
+	assessed := [][2]string{
+		{"localhost-isolation", "Localhost Isolation"},
+		{"port-exposure", "Port Exposure"},
+		{"docker-exposure", "Docker Daemon Exposure"},
+		{"tls-validity", "TLS / Certificate Validity"},
+		{"base-image", "Base Image Vulnerabilities"},
+		{"resource-boundaries", "Resource Boundaries"},
+	}
+	notAssessed := [][2]string{
+		{"ssh-hardening", "SSH Hardening"},
+		{"privileged-flag", "Privileged Flag"},
+		{"blank-passwords", "Blank Passwords"},
+		{"default-credentials", "Default Credentials"},
+		{"shared-ssh-keys", "Shared SSH Keys"},
+		{"shared-memory", "Shared Memory Restrictions"},
+		{"cipher-suite", "Cipher Suite Hardening"},
+		{"security-headers", "Security Header Injection"},
+		{"information-leakage", "Information Leakage"},
+		{"rate-limiting", "Rate Limiting"},
+	}
+	out := make([]securityCheck, 0, len(assessed)+len(notAssessed))
+	for _, c := range assessed {
+		st := "pass"
+		if issues[c[0]] > 0 {
+			st = "issues"
+		}
+		out = append(out, securityCheck{ID: c[0], Name: c[1], Status: st, Count: issues[c[0]]})
+	}
+	for _, c := range notAssessed {
+		out = append(out, securityCheck{ID: c[0], Name: c[1], Status: "not_assessed", Note: "Deeper host inspection — coming soon."})
+	}
+	return out
 }
 
 func splitServerNames(s string) []string {

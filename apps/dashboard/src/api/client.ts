@@ -7,7 +7,7 @@ import type {
   SessionInfo,
   Resource,
   DomainView,
-  SecurityFinding,
+  SecurityAudit,
   AlertInstance,
   EventItem,
   MetricsResponse,
@@ -68,7 +68,7 @@ export const api = {
   databases: (id: string) => request<Page<Resource>>(`/servers/${id}/databases`),
   applications: (id: string) => request<Page<Resource>>(`/servers/${id}/applications`),
   domains: (id: string) => request<Page<DomainView>>(`/servers/${id}/domains`),
-  security: (id: string) => request<Page<SecurityFinding>>(`/servers/${id}/security`),
+  security: (id: string) => request<SecurityAudit>(`/servers/${id}/security`),
   topology: (id: string) => request<Topology>(`/servers/${id}/topology`),
   metrics: (id: string, query: string, range: string) =>
     request<MetricsResponse>(`/servers/${id}/metrics?query=${encodeURIComponent(query)}&range=${range}`),

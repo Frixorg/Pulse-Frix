@@ -100,12 +100,32 @@ func (s *Server) handleServerSummary(w http.ResponseWriter, r *http.Request) {
 		for _, res := range snap.Resources {
 			switch res.Type {
 			case "docker_container":
-				if res.Status == "running" {
+				// Only RUNNING containers count toward health. A container that
+				// exited (seeders, one-shot jobs, init tasks) or was created but
+				// not started is a normal state — not "unhealthy".
+				switch res.Status {
+				case "running":
 					sum.Counts.ContainersRunning++
-				}
-				if res.Health == string(model.HealthDown) {
+					switch res.Health {
+					case string(model.HealthDegraded):
+						sum.Counts.ServicesDegraded++
+					case string(model.HealthDown):
+						sum.Counts.ContainersUnhealthy++
+						sum.Counts.ServicesDown++
+					default:
+						sum.Counts.ServicesHealthy++
+					}
+				case "restarting", "dead":
 					sum.Counts.ContainersUnhealthy++
+					sum.Counts.ServicesDown++
 				}
+			case "database", "reverse_proxy", "application", "systemd_unit":
+				countService(&sum.Counts, res.Health)
+			case "nginx_vhost":
+				sum.Counts.DomainsOnline++
+				countService(&sum.Counts, res.Health)
+			case "caddy_site", "apache_vhost", "traefik_router":
+				sum.Counts.DomainsOnline++
 			case "filesystem":
 				if v, ok := res.Attributes["used_pct"].(float64); ok && int(v) > sum.DiskUsePct {
 					sum.DiskUsePct = int(v)
@@ -117,20 +137,6 @@ func (s *Server) handleServerSummary(w http.ResponseWriter, r *http.Request) {
 			case "tls_certificate":
 				if v, ok := res.Attributes["days_left"].(float64); ok && v < 30 {
 					sum.Counts.DomainsSSLExpiring++
-				}
-			}
-			switch res.Health {
-			case string(model.HealthHealthy):
-				if isServiceType(res.Type) {
-					sum.Counts.ServicesHealthy++
-				}
-			case string(model.HealthDegraded):
-				if isServiceType(res.Type) {
-					sum.Counts.ServicesDegraded++
-				}
-			case string(model.HealthDown):
-				if isServiceType(res.Type) {
-					sum.Counts.ServicesDown++
 				}
 			}
 		}
@@ -151,22 +157,32 @@ func (s *Server) handleServerSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sum.Health = string(srv.Status)
-	if sum.Counts.ServicesDown > 0 || sum.DiskUsePct >= 95 {
-		sum.Health = string(model.HealthDown)
-	} else if sum.Counts.ServicesDegraded > 0 || sum.DiskUsePct >= 85 {
-		sum.Health = string(model.HealthDegraded)
-	} else if srv.Status == "" {
+	// VPS health reflects the machine, not individual workloads. It is driven by
+	// whether the agent is reporting (server status) and host resource pressure —
+	// NOT by a single stopped container. Per-container/service health is shown on
+	// their own pages.
+	switch {
+	case srv.Status == "" || srv.Status == model.HealthUnknown:
 		sum.Health = string(model.HealthUnknown)
+	case sum.DiskUsePct >= 95:
+		sum.Health = string(model.HealthDown)
+	case sum.DiskUsePct >= 85 || sum.Counts.ContainersUnhealthy >= 3:
+		sum.Health = string(model.HealthDegraded)
+	default:
+		sum.Health = string(model.HealthHealthy)
 	}
 
 	JSON(w, http.StatusOK, sum)
 }
 
-func isServiceType(t string) bool {
-	switch t {
-	case "docker_container", "database", "nginx_vhost", "reverse_proxy", "application", "systemd_unit":
-		return true
+// countService tallies a service-type resource by its health.
+func countService(c *summaryCount, health string) {
+	switch health {
+	case string(model.HealthHealthy):
+		c.ServicesHealthy++
+	case string(model.HealthDegraded):
+		c.ServicesDegraded++
+	case string(model.HealthDown):
+		c.ServicesDown++
 	}
-	return false
 }

@@ -74,10 +74,25 @@ export interface DomainView {
 }
 
 export interface SecurityFinding {
+  id: string;
+  category: string;
   severity: Severity;
   title: string;
+  resource?: string;
   detail: string;
   recommendation: string;
+}
+export interface SecurityCheck {
+  id: string;
+  name: string;
+  status: "pass" | "issues" | "not_assessed";
+  count: number;
+  note?: string;
+}
+export interface SecurityAudit {
+  generated_at: string;
+  checks: SecurityCheck[];
+  findings: SecurityFinding[];
 }
 
 export interface AlertInstance {

@@ -1,20 +1,27 @@
-/* Pulse design tokens. A dark, technical, information-dense theme. Status
-   colors: healthy (green), degraded (amber), down (red), unknown (grey).
-   See docs/UI_IA.md#design-tokens. */
+/* Pulse design tokens — unified with the landing page: deep obsidian surfaces,
+   neon-lime accent, glassmorphism, Space Grotesk (display) + JetBrains Mono
+   (body/data). Status colors: healthy/degraded/down/unknown. */
 
 :root {
-  --pulse-bg: #0b0e14;
-  --pulse-surface: #121722;
-  --pulse-surface-2: #171d2b;
-  --pulse-border: #232b3a;
-  --pulse-text: #e6ebf2;
-  --pulse-text-muted: #8b95a7;
-  --pulse-accent: #4f8cff;
+  /* obsidian base */
+  --pulse-bg: #06070a;
+  --pulse-surface: rgba(255, 255, 255, 0.045); /* glass card base */
+  --pulse-surface-2: rgba(255, 255, 255, 0.07); /* elevated glass */
+  --pulse-border: rgba(255, 255, 255, 0.10);
+  --pulse-text: #eaf0f7;
+  --pulse-text-muted: #8b97a9;
+  --pulse-accent: #c7f542; /* neon lime */
+  --pulse-accent-ink: #0a0c05; /* text on lime */
 
+  /* status */
   --pulse-healthy: #34d399;
   --pulse-degraded: #fbbf24;
   --pulse-down: #f87171;
   --pulse-unknown: #6b7280;
+
+  /* solid-ish surfaces for inputs/menus where transparency reads poorly */
+  --pulse-solid: #0d1017;
+  --pulse-solid-2: #12161f;
 
   --pulse-space-1: 4px;
   --pulse-space-2: 8px;
@@ -22,17 +29,34 @@
   --pulse-space-4: 16px;
   --pulse-space-6: 24px;
 
-  --pulse-radius: 10px;
-  --pulse-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --pulse-radius: 14px;
+  --pulse-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+
+  --pulse-font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --pulse-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* atmosphere accents (used by AtmosphereBg) */
+  --pulse-glow-a: rgba(199, 245, 66, 0.28);
+  --pulse-glow-b: rgba(56, 189, 248, 0.16);
+  --pulse-grid-line: rgba(255, 255, 255, 0.04);
 }
 
-/* Optional light theme (desktop-first, dark default). */
+/* Light theme — same lime identity on a bright, clean surface. */
 :root.light {
-  --pulse-bg: #f6f8fb;
-  --pulse-surface: #ffffff;
-  --pulse-surface-2: #f0f3f8;
-  --pulse-border: #dde3ec;
-  --pulse-text: #1a2130;
+  --pulse-bg: #eef1f6;
+  --pulse-surface: rgba(255, 255, 255, 0.72);
+  --pulse-surface-2: rgba(255, 255, 255, 0.92);
+  --pulse-border: rgba(15, 20, 30, 0.10);
+  --pulse-text: #12161f;
   --pulse-text-muted: #5b6577;
-  --pulse-accent: #2563eb;
+  --pulse-accent: #4f7a00; /* darker lime for contrast on light */
+  --pulse-accent-ink: #f4ffd6;
+
+  --pulse-solid: #ffffff;
+  --pulse-solid-2: #f0f3f8;
+  --pulse-shadow: 0 16px 40px rgba(15, 20, 30, 0.10);
+
+  --pulse-glow-a: rgba(120, 170, 20, 0.18);
+  --pulse-glow-b: rgba(56, 189, 248, 0.12);
+  --pulse-grid-line: rgba(15, 20, 30, 0.05);
 }

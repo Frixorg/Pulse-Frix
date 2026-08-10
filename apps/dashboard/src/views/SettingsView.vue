@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/api/client";
 import PageHeader from "@/components/PageHeader.vue";
+import ThemeToggle from "@/components/ThemeToggle.vue";
 
 const auth = useAuthStore();
 const token = ref("");
@@ -22,9 +23,6 @@ async function generateToken() {
   }
 }
 
-function toggleTheme() {
-  document.documentElement.classList.toggle("light");
-}
 </script>
 
 <template>
@@ -53,7 +51,10 @@ function toggleTheme() {
 
       <div class="card">
         <div class="card-title">Appearance</div>
-        <button class="btn btn-ghost" @click="toggleTheme">Toggle light / dark</button>
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-muted">Theme</span>
+          <ThemeToggle />
+        </div>
       </div>
 
       <div class="card">

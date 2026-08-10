@@ -31,5 +31,10 @@ export const useServersStore = defineStore("servers", {
     select(id: string) {
       this.selectedId = id;
     },
+    async remove(id: string) {
+      await api.deleteServer(id);
+      this.list = this.list.filter((s) => s.id !== id);
+      if (this.selectedId === id) this.selectedId = this.list[0]?.id ?? null;
+    },
   },
 });

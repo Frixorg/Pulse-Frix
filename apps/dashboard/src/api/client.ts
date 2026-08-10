@@ -57,6 +57,7 @@ export const api = {
   servers: () => request<Page<Server>>("/servers"),
   server: (id: string) => request<Server>(`/servers/${id}`),
   summary: (id: string) => request<ServerSummary>(`/servers/${id}/summary`),
+  deleteServer: (id: string) => request<{ status: string }>(`/servers/${id}`, { method: "DELETE" }),
 
   // discovery-derived
   discovery: (id: string) =>

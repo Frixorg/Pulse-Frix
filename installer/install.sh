@@ -143,14 +143,14 @@ precheck() {
   if [ "$MODE" = "cloud" ] && [ -z "$ENROLL_TOKEN" ]; then
     die "cloud mode requires --enrollment-token (generate one in the dashboard)"
   fi
-  # Refuse to run on the host that IS the Pulse cloud control plane — the
-  # installer is for OTHER VPSs, and here it would collide with the running
-  # stack (pulse-net, pulse-agent, pulse-node-exporter).
-  if have docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "pulse-api"; then
-    die "This host already runs the Pulse cloud stack (pulse-api).
-    The installer is for OTHER servers. To monitor THIS host, enrol its own agent:
-      docker compose -f infrastructure/docker-compose.cloud.yml --env-file .env --profile agent up -d pulse-agent
-    (set AGENT_ENROLLMENT_TOKEN in that .env first)."
+  # Only SELF-HOSTED (local) mode brings up a full stack that would collide with
+  # an existing control plane on this host. CLOUD mode just starts an isolated
+  # outbound agent, so it's safe to run here — that's exactly how you monitor
+  # the control-plane host itself.
+  if [ "$MODE" = "local" ] && have docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "pulse-api"; then
+    die "This host already runs a Pulse stack (pulse-api); the self-hosted installer would collide with it.
+    To monitor THIS host, use cloud mode instead:
+      sudo PULSE_API_URL=https://pulse.frix.me bash installer/install.sh --mode cloud --enrollment-token <token>"
   fi
   ok "Prechecks passed"
 }
@@ -159,6 +159,24 @@ precheck() {
 # Phase B — PLAN (immutable)
 # =============================================================================
 plan() {
+  if [ "$MODE" = "cloud" ]; then
+    log ""
+    log "${C_BOLD}SAFE INSTALLATION PLAN — cloud agent${C_RESET}"
+    log ""
+    log "The installer ${C_BOLD}WILL${C_RESET}:"
+    ok "start ONE outbound agent container (pulse-agent)"
+    ok "collect host + Docker metrics (Docker socket mounted READ-ONLY)"
+    ok "dial out to ${PULSE_API_URL:-https://pulse.frix.me} (no inbound port opened)"
+    ok "store agent state under ${PULSE_HOME}"
+    log ""
+    log "The installer will ${C_BOLD}NOT${C_RESET}:"
+    ok "open any inbound port or touch the firewall"
+    ok "modify existing containers, Nginx, or databases"
+    ok "write to the Docker socket (read-only)"
+    log ""
+    return 0
+  fi
+
   # Choose a safe, unused dashboard port. NEVER assume 3000/9090/9100 are free.
   if [ -n "$DASH_PORT" ]; then
     if port_in_use "$DASH_PORT"; then die "requested --dashboard-port $DASH_PORT is in use"; fi
@@ -201,6 +219,7 @@ confirm() {
 # Phase C — APPLY (only permitted changes)
 # =============================================================================
 apply() {
+  if [ "$MODE" = "cloud" ]; then apply_cloud; return; fi
   require_root_for_apply
   info "Applying (SAFE MODE)..."
 
@@ -297,6 +316,7 @@ EOF
 # Verify + report
 # =============================================================================
 verify() {
+  if [ "$MODE" = "cloud" ]; then verify_cloud; return; fi
   info "Verifying installation..."
   local url="http://127.0.0.1:${DASH_PORT}/healthz"
   if have curl && [ "$HAS_DOCKER" = 1 ] && [ "$HAS_COMPOSE" = 1 ]; then
@@ -308,6 +328,7 @@ verify() {
 }
 
 report() {
+  if [ "$MODE" = "cloud" ]; then report_cloud; return; fi
   log ""
   log "${C_BOLD}INSTALLATION COMPLETE${C_RESET}"
   log ""
@@ -325,6 +346,105 @@ report() {
   log "${C_GREEN}Existing services modified: 0${C_RESET}"
   log ""
   log "Next: run '${C_BOLD}pulse doctor${C_RESET}' to verify, or '${C_BOLD}pulse uninstall${C_RESET}' to remove Pulse only."
+}
+
+# =============================================================================
+# Cloud agent — a single isolated, outbound-only container. No dashboard, no
+# database, no inbound port. This is the normal-user path from the onboarding
+# panel ("run one command on your VPS").
+# =============================================================================
+apply_cloud() {
+  require_root_for_apply
+  info "Applying (SAFE MODE — cloud agent)..."
+  as_root mkdir -p "$PULSE_HOME"/{agent,state}
+  as_root chmod 750 "$PULSE_HOME"
+
+  local api_url env_file
+  api_url="${PULSE_API_URL:-https://pulse.frix.me}"
+  # If the control plane runs on THIS host, reach it through the dashboard's
+  # local port instead of hairpinning out to the public domain.
+  if have docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "pulse-api"; then
+    api_url="http://127.0.0.1:8090"
+    info "Control plane detected on this host — pointing the agent at ${api_url}"
+  fi
+
+  env_file="$PULSE_HOME/.env"
+  as_root tee "$env_file" >/dev/null <<EOF
+PULSE_MODE=cloud
+PULSE_API_URL=$api_url
+AGENT_ENROLLMENT_TOKEN=$ENROLL_TOKEN
+PULSE_DATA_DIR=/data
+EOF
+  as_root chmod 600 "$env_file"
+  ok "wrote agent configuration to $env_file (0600)"
+  write_manifest_cloud
+
+  if [ "$HAS_DOCKER" != 1 ] || [ "$HAS_COMPOSE" != 1 ]; then
+    die "Docker + Compose are required for the cloud agent. Install Docker and re-run."
+  fi
+  info "Starting the outbound agent..."
+  local compose_cmd; compose_cmd="$(compose_binary)"
+  ( cd "$REPO_ROOT" && as_root $compose_cmd --env-file "$env_file" -p pulse \
+      -f infrastructure/docker-compose.agent.yml up -d --build ) \
+    || die "compose failed; run './installer/uninstall.sh' to remove anything this run created"
+  ok "agent started — shipping metrics outbound"
+}
+
+write_manifest_cloud() {
+  as_root tee "$MANIFEST" >/dev/null <<EOF
+{
+  "created": ["$PULSE_HOME"],
+  "modified": [],
+  "services_created": ["pulse-agent"],
+  "ports_allocated": [],
+  "networks_created": [],
+  "containers_created": ["pulse-agent"],
+  "mode": "cloud",
+  "created_at": "$(date -u +%FT%TZ)"
+}
+EOF
+  ok "recorded installation manifest at $MANIFEST"
+}
+
+verify_cloud() {
+  info "Verifying the agent..."
+  sleep 3
+  if ! ( have docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "pulse-agent" ); then
+    warn "agent container not running yet — check 'docker logs pulse-agent'"
+    return 0
+  fi
+  ok "agent container is running"
+  local i logs
+  for i in $(seq 1 10); do
+    logs="$(docker logs pulse-agent 2>&1 || true)"
+    if printf '%s' "$logs" | grep -qi "enrolled with cloud"; then
+      ok "agent enrolled with the control plane"
+      return 0
+    fi
+    if printf '%s' "$logs" | grep -qi "enrollment failed"; then
+      warn "enrollment was rejected — your tracking key has likely expired (keys are single-use and short-lived)."
+      warn "Generate a fresh key in the dashboard and re-run the same command; nothing else needs cleaning up."
+      return 0
+    fi
+    sleep 2
+  done
+  info "agent is starting up; it will enroll and appear in your dashboard shortly"
+}
+
+report_cloud() {
+  local eff_url
+  eff_url="$(grep -E '^PULSE_API_URL=' "$PULSE_HOME/.env" 2>/dev/null | cut -d= -f2- || true)"
+  log ""
+  log "${C_BOLD}AGENT INSTALLED${C_RESET}"
+  log ""
+  log "This server is now shipping metrics to ${eff_url:-${PULSE_API_URL:-https://pulse.frix.me}}."
+  log "It appears on your dashboard automatically — the onboarding page refreshes itself."
+  log ""
+  log "Config:     $PULSE_HOME/.env"
+  log "Manifest:   $MANIFEST"
+  log "Logs:       docker logs -f pulse-agent"
+  log ""
+  log "${C_GREEN}Existing services modified: 0${C_RESET}"
 }
 
 # =============================================================================

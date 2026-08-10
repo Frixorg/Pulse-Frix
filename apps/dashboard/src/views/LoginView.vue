@@ -117,7 +117,7 @@ async function submit() {
 <style scoped>
 .login {
   position: relative;
-  min-height: 100%;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -231,14 +231,14 @@ async function submit() {
   border-radius: 11px;
   background: var(--pulse-accent);
   border: 1px solid rgba(199, 245, 66, 0.35);
-  color: #fff;
+  color: var(--pulse-accent-ink);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
-  transition: background 0.15s, transform 0.12s;
+  transition: filter 0.15s, transform 0.12s;
 }
 .host-btn:hover {
-  background: rgba(var(--pulse-accent),0.9);
+  filter: brightness(1.06);
   transform: translateY(-1px);
 }
 .form {

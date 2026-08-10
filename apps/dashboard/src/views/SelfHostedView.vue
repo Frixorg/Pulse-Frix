@@ -103,7 +103,7 @@ function copy(text: string, id: string) {
 <style scoped>
 .sh {
   position: relative;
-  min-height: 100%;
+  min-height: 100vh;
   background: var(--pulse-bg);
   color: var(--pulse-text);
   font-family: var(--pulse-font-mono);

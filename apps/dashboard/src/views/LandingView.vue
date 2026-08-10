@@ -195,14 +195,17 @@ const features = [
 
 <style scoped>
 .lp {
-  --ink: #06070a;
-  --ink2: #0a0c11;
-  --lime: #c7f542;
-  --text: #eaf0f7;
-  --muted: #8b97a9;
-  --glass: rgba(255, 255, 255, 0.045);
-  --glass-2: rgba(255, 255, 255, 0.07);
-  --line: rgba(255, 255, 255, 0.09);
+  /* Alias the landing's private vars to the global theme tokens so the whole
+     page follows light/dark automatically — no per-theme overrides needed.
+     Dark mode resolves to the exact same values as before. */
+  --ink: var(--pulse-bg);
+  --ink2: var(--pulse-solid);
+  --lime: var(--pulse-accent);
+  --text: var(--pulse-text);
+  --muted: var(--pulse-text-muted);
+  --glass: var(--pulse-surface);
+  --glass-2: var(--pulse-surface-2);
+  --line: var(--pulse-border);
   position: relative;
   min-height: 100vh;
   background: var(--ink);
@@ -211,75 +214,18 @@ const features = [
   overflow-x: hidden;
 }
 
-/* Light theme — same lime identity on a bright surface. The platform defaults
-   to dark; this only applies when the user toggles light (html.light). */
-:global(html.light) .lp {
-  --ink: #eef1f6;
-  --ink2: #e6eaf1;
-  --lime: #4d7c0f; /* deeper lime so accents/text stay legible on white */
-  --text: #12161f;
-  --muted: #566072;
-  --glass: rgba(255, 255, 255, 0.72);
-  --glass-2: rgba(255, 255, 255, 0.92);
-  --line: rgba(15, 20, 30, 0.12);
-}
-:global(html.light) .nav {
-  background: rgba(238, 241, 246, 0.72);
-}
-:global(html.light) .btn-lime {
-  color: #f4ffd6;
-  box-shadow: 0 0 0 1px rgba(77, 124, 15, 0.5), 0 8px 24px rgba(77, 124, 15, 0.2);
-}
-:global(html.light) .grad {
-  background: linear-gradient(100deg, #4d7c0f, #6ea01a 55%, #4d7c0f);
-  -webkit-background-clip: text;
-  background-clip: text;
-}
-:global(html.light) .float-shell {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.7));
-  box-shadow: 0 30px 80px rgba(15, 20, 30, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-}
-:global(html.light) .shell-bar {
-  background: rgba(15, 20, 30, 0.03);
-}
-:global(html.light) .bar {
-  background: rgba(15, 20, 30, 0.08);
-}
-:global(html.light) .badge,
-:global(html.light) .mode-tag.lime {
-  background: rgba(77, 124, 15, 0.1);
-  border-color: rgba(77, 124, 15, 0.35);
-}
-:global(html.light) .step-n {
-  background: rgba(77, 124, 15, 0.1);
-  border-color: rgba(77, 124, 15, 0.35);
-}
-:global(html.light) .lp-grid {
-  background-image:
-    linear-gradient(rgba(15, 20, 30, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 20, 30, 0.05) 1px, transparent 1px);
-}
-:global(html.light) .lp-grain {
-  opacity: 0.025;
-}
-:global(html.light) .lp-glow-a {
-  background: radial-gradient(circle, rgba(120, 170, 20, 0.18), transparent 70%);
-}
-:global(html.light) .lp-glow-b {
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.12), transparent 70%);
-}
 /* atmosphere */
 .lp-grid {
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    linear-gradient(var(--pulse-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--pulse-grid-line) 1px, transparent 1px);
   background-size: 64px 64px;
   mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 40%, transparent 100%);
 }
 .lp-glow { position: fixed; border-radius: 50%; filter: blur(120px); opacity: 0.5; pointer-events: none; z-index: 0; }
-.lp-glow-a { width: 560px; height: 560px; top: -160px; left: -120px; background: radial-gradient(circle, rgba(199,245,66,0.28), transparent 70%); }
-.lp-glow-b { width: 620px; height: 620px; top: 240px; right: -200px; background: radial-gradient(circle, rgba(56,189,248,0.16), transparent 70%); }
+.lp-glow-a { width: 560px; height: 560px; top: -160px; left: -120px; background: radial-gradient(circle, var(--pulse-glow-a), transparent 70%); }
+.lp-glow-b { width: 620px; height: 620px; top: 240px; right: -200px; background: radial-gradient(circle, var(--pulse-glow-b), transparent 70%); }
 .lp-grain {
   position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.05; mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -288,7 +234,7 @@ const features = [
 .wrap { position: relative; z-index: 2; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
 /* nav */
-.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); background: rgba(6,7,10,0.6); border-bottom: 1px solid var(--line); }
+.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); background: var(--glass); border-bottom: 1px solid var(--line); }
 .nav-in { display: flex; align-items: center; gap: 20px; height: 64px; }
 .brand { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -0.02em; color: var(--text); text-decoration: none; display: inline-flex; align-items: center; gap: 9px; }
 .brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px var(--lime); }
@@ -299,7 +245,7 @@ const features = [
 /* buttons */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 18px; border-radius: 10px; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; transition: transform 0.12s, background 0.15s, border-color 0.15s; white-space: nowrap; }
 .btn:hover { transform: translateY(-1px); }
-.btn-lime { background: var(--lime); color: #0a0c05; font-weight: 700; box-shadow: 0 0 0 1px rgba(199,245,66,0.5), 0 8px 30px rgba(199,245,66,0.18); }
+.btn-lime { background: var(--lime); color: var(--pulse-accent-ink); font-weight: 700; box-shadow: 0 0 0 1px rgba(199,245,66,0.5), 0 8px 30px rgba(199,245,66,0.18); }
 .btn-glass { background: var(--glass); border: 1px solid var(--line); color: var(--text); backdrop-filter: blur(8px); }
 .btn-glass:hover { background: var(--glass-2); }
 .btn-ghost-glass { background: transparent; border: 1px solid var(--line); color: var(--text); padding: 9px 16px; border-radius: 10px; font-size: 13px; text-decoration: none; }
@@ -309,7 +255,7 @@ const features = [
 .hero { padding: 92px 0 40px; max-width: 820px; }
 .eyebrow { font-size: 12px; color: var(--lime); letter-spacing: 0.06em; }
 .h1 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: clamp(40px, 7vw, 78px); line-height: 1.02; letter-spacing: -0.03em; margin: 18px 0 0; }
-.grad { background: linear-gradient(100deg, var(--lime), #eaffb0 60%, var(--lime)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.grad { background: linear-gradient(100deg, var(--lime), var(--lime)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lede { color: var(--muted); font-size: 16px; line-height: 1.7; margin: 22px 0 30px; max-width: 620px; }
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 26px; }
 .cmd { display: inline-flex; align-items: center; gap: 12px; width: 100%; max-width: 560px; padding: 13px 15px; border-radius: 12px; background: var(--glass); border: 1px solid var(--line); font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--text); cursor: pointer; text-align: left; backdrop-filter: blur(8px); transition: border-color 0.15s; }
@@ -321,8 +267,8 @@ const features = [
 .cmd.sm { max-width: 100%; font-size: 12px; }
 
 /* floating shell */
-.float-shell { position: relative; z-index: 2; margin: 30px 0 20px; border-radius: 18px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); backdrop-filter: blur(18px); box-shadow: 0 40px 120px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08); overflow: hidden; }
-.shell-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.02); }
+.float-shell { position: relative; z-index: 2; margin: 30px 0 20px; border-radius: 18px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(18px); box-shadow: var(--pulse-shadow), inset 0 1px 0 rgba(255,255,255,0.08); overflow: hidden; }
+.shell-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--glass); }
 .dot { width: 11px; height: 11px; border-radius: 50%; }
 .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
 .shell-title { margin-left: 10px; font-size: 12px; color: var(--muted); }
@@ -337,7 +283,7 @@ const features = [
 .stat-v { font-family: "Space Grotesk", sans-serif; font-size: 30px; font-weight: 600; margin-top: 4px; }
 .stat-v small { font-size: 15px; color: var(--muted); }
 .badge { display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 999px; font-size: 12px; color: var(--lime); background: rgba(199,245,66,0.12); border: 1px solid rgba(199,245,66,0.3); }
-.bar { height: 6px; border-radius: 4px; background: rgba(255,255,255,0.08); margin-top: 10px; overflow: hidden; }
+.bar { height: 6px; border-radius: 4px; background: var(--glass-2); margin-top: 10px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--lime); box-shadow: 0 0 10px rgba(199,245,66,0.6); }
 .bar i.warn { background: #febc2e; box-shadow: 0 0 10px rgba(254,188,46,0.5); }
 .spark { display: flex; align-items: flex-end; gap: 5px; height: 66px; margin-top: 12px; }

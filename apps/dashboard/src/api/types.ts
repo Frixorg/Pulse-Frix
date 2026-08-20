@@ -73,26 +73,74 @@ export interface DomainView {
   source: string;
 }
 
+export type FindingSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+export type CheckStatus = "pass" | "issues" | "error" | "skipped" | "not_run";
+export type CheckKind = "passive" | "active";
+export type ScanStatus = "queued" | "running" | "done" | "error";
+export type ScanMode = "passive" | "active" | "full";
+export type LogLevel = "info" | "warn" | "error" | "success";
+
+export interface SecurityCategory {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+}
 export interface SecurityFinding {
   id: string;
+  check_id: string;
   category: string;
-  severity: Severity;
+  severity: FindingSeverity;
   title: string;
   resource?: string;
   detail: string;
+  evidence?: string;
   recommendation: string;
+  cvss?: number;
+  owasp?: string;
+  cwe?: string;
+  references?: string[];
 }
 export interface SecurityCheck {
   id: string;
+  category: string;
   name: string;
-  status: "pass" | "issues" | "not_assessed";
+  description: string;
+  kind: CheckKind;
+  owasp?: string;
+  status: CheckStatus;
   count: number;
   note?: string;
+  duration_ms?: number;
 }
-export interface SecurityAudit {
-  generated_at: string;
+export interface ScanLog {
+  t: string;
+  level: LogLevel;
+  check?: string;
+  msg: string;
+}
+export interface ScanState {
+  id: string;
+  server_id: string;
+  status: ScanStatus;
+  mode: ScanMode;
+  categories?: string[];
+  targets?: string[];
+  progress: number;
+  current?: string;
+  total: number;
+  completed: number;
+  started_at: string;
+  finished_at?: string;
   checks: SecurityCheck[];
   findings: SecurityFinding[];
+  logs: ScanLog[];
+  error?: string;
+}
+export interface SecurityAudit {
+  categories: SecurityCategory[];
+  checks: SecurityCheck[];
+  latest?: ScanState | null;
 }
 
 export interface Alert {

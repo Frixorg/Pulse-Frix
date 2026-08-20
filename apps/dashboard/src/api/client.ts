@@ -8,6 +8,8 @@ import type {
   Resource,
   DomainView,
   SecurityAudit,
+  ScanState,
+  ScanMode,
   Alert,
   AlertInstance,
   EventItem,
@@ -70,8 +72,11 @@ export const api = {
   databases: (id: string) => request<Page<Resource>>(`/servers/${id}/databases`),
   applications: (id: string) => request<Page<Resource>>(`/servers/${id}/applications`),
   domains: (id: string) => request<Page<DomainView>>(`/servers/${id}/domains`),
-  security: (id: string, check?: string) =>
-    request<SecurityAudit>(`/servers/${id}/security${check ? `?check=${encodeURIComponent(check)}` : ""}`),
+  security: (id: string) => request<SecurityAudit>(`/servers/${id}/security`),
+  startSecurityScan: (id: string, body: { mode?: ScanMode; categories?: string[] }) =>
+    request<{ scan_id: string }>(`/servers/${id}/security/scan`, { method: "POST", body: JSON.stringify(body) }),
+  securityScan: (id: string, scanId: string) =>
+    request<ScanState>(`/servers/${id}/security/scan/${scanId}`),
   topology: (id: string) => request<Topology>(`/servers/${id}/topology`),
   metrics: (id: string, query: string, range: string) =>
     request<MetricsResponse>(`/servers/${id}/metrics?query=${encodeURIComponent(query)}&range=${range}`),

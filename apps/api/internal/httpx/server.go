@@ -13,6 +13,7 @@ import (
 	"github.com/frix-me/pulse/api/internal/metricsproxy"
 	"github.com/frix-me/pulse/api/internal/oidc"
 	"github.com/frix-me/pulse/api/internal/rbac"
+	"github.com/frix-me/pulse/api/internal/scanner"
 	"github.com/frix-me/pulse/api/internal/store"
 )
 
@@ -24,6 +25,7 @@ type Server struct {
 	audit   *audit.Recorder
 	metrics *metricsproxy.Client
 	oidc    *oidc.Manager
+	sec     *scanner.Manager
 
 	loginLimiter  *Limiter
 	enrollLimiter *Limiter
@@ -58,6 +60,7 @@ func New(cfg *config.Config, st store.Store, logger *slog.Logger) *Server {
 		audit:         audit.New(st, logger),
 		metrics:       metricsproxy.New(cfg.MetricsURL),
 		oidc:          oidc.NewManager(provs),
+		sec:           scanner.NewManager(logger),
 		loginLimiter:  NewLimiter(0.2, 5),  // ~5 attempts then 1 / 5s
 		enrollLimiter: NewLimiter(0.1, 3),  // strict on enrollment
 		ingestLimiter: NewLimiter(50, 100), // agent ingestion (per IP)
@@ -98,6 +101,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/servers/{id}/applications", s.requirePerm(rbac.ServerRead, s.handleApplications))
 	mux.HandleFunc("GET /api/v1/servers/{id}/domains", s.requirePerm(rbac.ServerRead, s.handleDomains))
 	mux.HandleFunc("GET /api/v1/servers/{id}/security", s.requirePerm(rbac.ServerRead, s.handleSecurity))
+	mux.HandleFunc("POST /api/v1/servers/{id}/security/scan", s.requirePerm(rbac.ServerRead, s.handleSecurityScanStart))
+	mux.HandleFunc("GET /api/v1/servers/{id}/security/scan/{scanId}", s.requirePerm(rbac.ServerRead, s.handleSecurityScanGet))
 	mux.HandleFunc("GET /api/v1/servers/{id}/metrics", s.requirePerm(rbac.ServerRead, s.handleMetrics))
 	mux.HandleFunc("GET /api/v1/servers/{id}/logs", s.requirePerm(rbac.ServerRead, s.handleLogs))
 

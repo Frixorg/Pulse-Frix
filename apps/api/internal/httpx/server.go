@@ -119,6 +119,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/servers/{id}/ssh/setup",
 		s.sshLimiter.Middleware()(s.requirePerm(rbac.SSHExec, s.handleSSHSetup)))
 	mux.HandleFunc("GET /api/v1/servers/{id}/ssh/sessions/{sid}/attach", s.requirePerm(rbac.SSHExec, s.handleSSHAttach))
+	// WebSocket-free transport, for deployments behind a proxy whose CSP has no
+	// connect-src and therefore blocks wss:// (see handlers_ssh_stream.go).
+	mux.HandleFunc("GET /api/v1/servers/{id}/ssh/sessions/{sid}/stream", s.requirePerm(rbac.SSHExec, s.handleSSHStream))
+	mux.HandleFunc("POST /api/v1/servers/{id}/ssh/sessions/{sid}/input", s.requirePerm(rbac.SSHExec, s.handleSSHInput))
 	mux.HandleFunc("DELETE /api/v1/servers/{id}/ssh/sessions/{sid}", s.requirePerm(rbac.SSHExec, s.handleSSHClose))
 
 	// Agents & enrollment

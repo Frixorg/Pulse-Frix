@@ -194,6 +194,19 @@ no token ever appears in a URL. The wire protocol is deliberately tiny:
 | API → browser | binary | terminal output, verbatim |
 | API → browser | text `{"type":"status"\|"exit",…}` | session lifecycle |
 
+When a WebSocket is impossible the dashboard uses the same session over two
+plain HTTP endpoints instead:
+
+| Method | Path | Carries |
+|--------|------|---------|
+| `GET` | `…/ssh/sessions/{sid}/stream` | terminal output as base64 SSE `data` events |
+| `POST` | `…/ssh/sessions/{sid}/input` | `{"type":"data","data":"<base64>"}` or `{"type":"resize","cols":N,"rows":M}` |
+
+Both need the `ssh.exec` permission, and `stream` claims the session exactly as
+`attach` does — one transport at a time. The stream sets `X-Accel-Buffering: no`
+and sends a comment heartbeat every 20s so proxies neither buffer nor time it
+out.
+
 ---
 
 ## Reverse proxies
@@ -208,7 +221,8 @@ hand-rolled nginx), two things there can break the terminal.
 
 ### 1. Content-Security-Policy
 
-This is the common one. A CSP like
+This is the common one, and the console **handles it on its own** — read this
+only if you want the faster transport back. A CSP like
 
 ```text
 default-src https: data: blob: 'unsafe-inline' 'unsafe-eval'
@@ -226,18 +240,26 @@ fallback.
 ```
 
 Every CSP header on the response is enforced, so a permissive one from Pulse
-cannot rescue a restrictive one from your proxy. Fix it at your proxy by adding
-an explicit `connect-src`:
+cannot rescue a restrictive one from your proxy.
+
+**Pulse falls back automatically.** When the browser refuses the WebSocket, the
+console reconnects over server-sent events plus ordinary POSTs — plain https,
+which that same policy allows — and the terminal works normally. The toolbar
+shows an `http fallback` chip so the switch is never silent, and the choice is
+remembered per browser so later sessions do not retry a socket that cannot open.
+
+The fallback costs a little latency and one request per burst of keystrokes, so
+it is still worth restoring the WebSocket. Fix it at your proxy by adding an
+explicit `connect-src`:
 
 ```text
 add_header Content-Security-Policy "default-src https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' wss://pulse.example.com" always;
 ```
 
 or, if you would rather not manage a CSP there at all, remove the header and let
-Pulse's own (already correct) one apply.
-
-The SSH page detects this specific failure and says so, rather than hanging on
-"Connecting…".
+Pulse's own (already correct) one apply. Clear `pulse-ssh-transport` from the
+browser's local storage — or just use a different browser profile — to make the
+console try the WebSocket again.
 
 ### 2. Upgrade headers and timeouts
 

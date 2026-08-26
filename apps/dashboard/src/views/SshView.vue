@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { useServersStore } from "@/stores/servers";
-import { api, sshSocketURL, ApiError } from "@/api/client";
+import { api, sshSocketURL, sshStreamURL, sshInputURL, ApiError } from "@/api/client";
 import type { SSHCapabilities, SSHAuthMethod, SSHSetupResult, SSHSetupStep, Resource } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -291,7 +291,6 @@ const sessionId = ref("");
 
 let term: Terminal | null = null;
 let fit: FitAddon | null = null;
-let socket: WebSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 const encoder = new TextEncoder();
 
@@ -370,14 +369,12 @@ function createTerminal() {
 
   // Keystrokes go to the remote shell verbatim, as bytes.
   term.onData((data) => {
-    if (socket?.readyState === WebSocket.OPEN) socket.send(encoder.encode(data));
+    transport?.sendBytes(encoder.encode(data));
   });
   // Tell the remote PTY whenever the window changes, so full-screen programs
   // (vim, htop, less) redraw at the right size.
   term.onResize(({ cols, rows }) => {
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "resize", cols, rows }));
-    }
+    transport?.sendResize(cols, rows);
   });
 
   resizeObserver = new ResizeObserver(() => refit());
@@ -442,12 +439,9 @@ async function connect() {
     firstConnection.value = session.first_connection && !pinnedKey();
     if (session.fingerprint) pinKey(session.fingerprint);
     saveProfile();
-    // The secrets have done their job; drop them from memory and from the DOM.
-    password.value = "";
-    privateKey.value = "";
-    passphrase.value = "";
-
-    openSocket(selected.value.id, session.session_id);
+    // Secrets are cleared by onTransportOpen, once a transport is actually
+    // live — clearing them here would strand a retry with nothing to send.
+    connectTransport(selected.value.id, session.session_id);
   } catch (e) {
     phase.value = "idle";
     if (e instanceof ApiError) {
@@ -460,65 +454,134 @@ async function connect() {
   }
 }
 
-// A Content-Security-Policy that forgets `connect-src` blocks the console
-// before a single byte leaves the browser — and the only clue is a line in the
-// devtools console. Listening for the violation turns that into a message the
-// operator can act on. See docs/SSH_CONSOLE.md#reverse-proxies.
-const CSP_HELP =
-  "Your browser blocked the terminal connection: the page's Content-Security-Policy " +
-  "does not allow a WebSocket. Add connect-src to the CSP on whatever serves or " +
-  "proxies Pulse — see docs/SSH_CONSOLE.md.";
+// --- transports ---------------------------------------------------------------
+//
+// The WebSocket is the fast path. Plenty of deployments sit behind a reverse
+// proxy whose Content-Security-Policy looks permissive but omits `connect-src`:
+//
+//   default-src https: data: blob: 'unsafe-inline' 'unsafe-eval'
+//
+// `https:` does not match `wss:`, so the browser refuses the socket before it
+// leaves the machine, and a CSP set upstream cannot be overridden from here.
+// Rather than send every operator off to edit their proxy, the console falls
+// back to server-sent events plus ordinary POSTs, which that policy allows.
+
+interface Transport {
+  kind: "websocket" | "http";
+  sendBytes(bytes: Uint8Array): void;
+  sendResize(cols: number, rows: number): void;
+  close(): void;
+}
+
+let transport: Transport | null = null;
+const transportKind = ref<"websocket" | "http">("websocket");
+
+const TRANSPORT_KEY = "pulse-ssh-transport";
+
+// Once a WebSocket has been refused on this deployment, remember it: retrying
+// on every connect costs a second and a scary console error each time.
+function preferHTTP(): boolean {
+  return readJSON<string>(TRANSPORT_KEY, "") === "http";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+  return btoa(out);
+}
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function onTransportOpen(kind: "websocket" | "http") {
+  transportKind.value = kind;
+  phase.value = "connected";
+  // The secrets have done their job now that a transport is actually live.
+  password.value = "";
+  privateKey.value = "";
+  passphrase.value = "";
+  nextTick(() => {
+    refit();
+    focusTerminal();
+    if (term) transport?.sendResize(term.cols, term.rows);
+  });
+}
+
+function onTransportEnd(notice: string) {
+  transport = null;
+  if (phase.value === "connected") {
+    writeNotice(notice);
+    phase.value = "ended";
+  }
+}
+
+function connectTransport(serverId: string, sid: string) {
+  if (preferHTTP()) {
+    openHTTPTransport(serverId, sid);
+    return;
+  }
+  openWebSocket(serverId, sid);
+}
+
+// --- WebSocket ---
 
 let cspListener: ((e: SecurityPolicyViolationEvent) => void) | null = null;
 
-function watchForCSPBlock(url: string) {
-  stopWatchingCSP();
-  cspListener = (e: SecurityPolicyViolationEvent) => {
-    const blocked = e.blockedURI || "";
-    if (e.effectiveDirective?.includes("connect-src") || blocked.startsWith("ws")) {
-      if (!blocked || url.startsWith(blocked) || blocked.startsWith("ws")) {
-        error.value = CSP_HELP;
-        errorCode.value = "CSP_BLOCKED";
-        phase.value = "idle";
-      }
-    }
-  };
-  document.addEventListener("securitypolicyviolation", cspListener);
-}
 function stopWatchingCSP() {
   if (cspListener) document.removeEventListener("securitypolicyviolation", cspListener);
   cspListener = null;
 }
 
-function openSocket(serverId: string, sid: string) {
-  const url = sshSocketURL(serverId, sid);
-  watchForCSPBlock(url);
+function openWebSocket(serverId: string, sid: string) {
+  let settled = false;
+  // Any failure before the socket opens drops straight to the HTTP transport,
+  // so a blocked socket never leaves the user staring at "Connecting…".
+  const fallback = () => {
+    if (settled) return;
+    settled = true;
+    stopWatchingCSP();
+    writeJSON(TRANSPORT_KEY, "http");
+    openHTTPTransport(serverId, sid);
+  };
+
+  stopWatchingCSP();
+  cspListener = (e: SecurityPolicyViolationEvent) => {
+    const blocked = e.blockedURI || "";
+    if (e.effectiveDirective?.includes("connect-src") || blocked.startsWith("ws")) fallback();
+  };
+  document.addEventListener("securitypolicyviolation", cspListener);
+
   let ws: WebSocket;
   try {
-    ws = new WebSocket(url);
+    ws = new WebSocket(sshSocketURL(serverId, sid));
   } catch {
-    // Some browsers throw here rather than firing a violation event.
-    stopWatchingCSP();
-    phase.value = "idle";
-    error.value = CSP_HELP;
-    errorCode.value = "CSP_BLOCKED";
+    // Some browsers throw here instead of firing a violation event.
+    fallback();
     return;
   }
   ws.binaryType = "arraybuffer";
-  socket = ws;
+
+  transport = {
+    kind: "websocket",
+    sendBytes: (bytes) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(bytes);
+    },
+    sendResize: (cols, rows) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    },
+    close: () => ws.close(),
+  };
 
   ws.onopen = () => {
+    settled = true;
     stopWatchingCSP();
-    phase.value = "connected";
-    nextTick(() => {
-      refit();
-      term?.focus();
-      if (term) ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-    });
+    onTransportOpen("websocket");
   };
   ws.onmessage = (ev) => {
     if (typeof ev.data === "string") {
-      // Control channel: status and exit notices.
       try {
         const msg = JSON.parse(ev.data) as { type?: string; message?: string };
         if (msg.type === "exit") writeNotice(msg.message || "session ended");
@@ -529,31 +592,100 @@ function openSocket(serverId: string, sid: string) {
     }
     term?.write(new Uint8Array(ev.data as ArrayBuffer));
   };
-  ws.onerror = () => {
-    if (phase.value === "connecting") error.value = "The console connection failed.";
-  };
+  ws.onerror = () => fallback();
   ws.onclose = () => {
-    socket = null;
     stopWatchingCSP();
-    if (phase.value === "connected") {
-      writeNotice("— disconnected —");
-      phase.value = "ended";
-    } else if (phase.value === "connecting") {
-      phase.value = "idle";
-      if (!error.value) {
-        error.value =
-          "The console connection closed before it opened. If Pulse sits behind a " +
-          "reverse proxy, check that it forwards the WebSocket upgrade — see docs/SSH_CONSOLE.md.";
-      }
+    if (!settled) {
+      fallback();
+      return;
     }
+    onTransportEnd("— disconnected —");
+  };
+}
+
+// --- server-sent events + POST ---
+
+function openHTTPTransport(serverId: string, sid: string) {
+  const es = new EventSource(sshStreamURL(serverId, sid));
+  let opened = false;
+  let finished = false;
+
+  // Keystrokes are coalesced into roughly one POST per frame: a request per
+  // character would be pointless traffic, and a fast typist would outrun it.
+  let pending: number[] = [];
+  let flushTimer: number | undefined;
+
+  const post = (body: unknown) =>
+    fetch(sshInputURL(serverId, sid), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => undefined);
+
+  const flush = () => {
+    flushTimer = undefined;
+    if (!pending.length) return;
+    const bytes = Uint8Array.from(pending);
+    pending = [];
+    post({ type: "data", data: bytesToBase64(bytes) });
+  };
+
+  const finish = (notice: string) => {
+    if (finished) return;
+    finished = true;
+    es.close();
+    onTransportEnd(notice);
+  };
+
+  transport = {
+    kind: "http",
+    sendBytes: (bytes) => {
+      for (let i = 0; i < bytes.length; i++) pending.push(bytes[i]);
+      if (flushTimer === undefined) flushTimer = window.setTimeout(flush, 12);
+    },
+    sendResize: (cols, rows) => {
+      post({ type: "resize", cols, rows });
+    },
+    close: () => {
+      finished = true;
+      es.close();
+    },
+  };
+
+  es.addEventListener("status", () => {
+    if (opened) return;
+    opened = true;
+    onTransportOpen("http");
+  });
+  es.addEventListener("data", (ev) => {
+    term?.write(base64ToBytes((ev as MessageEvent<string>).data));
+  });
+  es.addEventListener("exit", () => {
+    finish("— session ended —");
+  });
+  es.onerror = () => {
+    // EventSource retries on its own, but a console session can be attached
+    // only once, so a retry would be refused. Close it and report instead.
+    if (!opened) {
+      es.close();
+      finished = true;
+      transport = null;
+      phase.value = "idle";
+      error.value =
+        "Could not open the terminal stream. If Pulse sits behind a reverse proxy, check " +
+        "that it does not buffer or time out streaming responses — see docs/SSH_CONSOLE.md.";
+      return;
+    }
+    finish("— connection lost —");
   };
 }
 
 async function disconnect() {
   const sid = sessionId.value;
   const serverId = selected.value?.id;
-  socket?.close();
-  socket = null;
+  transport?.close();
+  transport = null;
   if (sid && serverId) await api.closeSSHSession(serverId, sid).catch(() => undefined);
   sessionId.value = "";
   phase.value = "ended";
@@ -582,7 +714,7 @@ function setFontSize(delta: number) {
 async function pasteFromClipboard() {
   try {
     const text = await navigator.clipboard.readText();
-    if (text && socket?.readyState === WebSocket.OPEN) socket.send(encoder.encode(text));
+    if (text) transport?.sendBytes(encoder.encode(text));
   } catch {
     writeNotice("clipboard access was blocked by the browser — use Ctrl+Shift+V");
   }
@@ -615,8 +747,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopWatchingCSP();
   window.removeEventListener("keydown", onKeydown);
-  socket?.close();
-  socket = null;
+  transport?.close();
+  transport = null;
   if (sessionId.value && selected.value) {
     api.closeSSHSession(selected.value.id, sessionId.value).catch(() => undefined);
   }
@@ -901,6 +1033,13 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
           <span class="who">{{ statusLabel }}</span>
           <span v-if="fingerprint" class="fp" :title="`Host key ${fingerprint}`">
             {{ firstConnection ? "new host key" : "host key ok" }} · {{ fingerprint.slice(0, 22) }}…
+          </span>
+          <span
+            v-if="phase === 'connected' && transportKind === 'http'"
+            class="fp alt"
+            title="This browser could not open a WebSocket — most often a reverse-proxy Content-Security-Policy without connect-src. The terminal is running over server-sent events instead, which works but adds a little latency. See docs/SSH_CONSOLE.md."
+          >
+            http fallback
           </span>
 
           <div class="bar-sp"></div>
@@ -1533,6 +1672,11 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
   font-family: var(--pulse-font-mono);
   font-size: 12.5px;
   font-weight: 700;
+}
+.fp.alt {
+  color: var(--pulse-degraded);
+  border-color: rgba(251, 191, 36, 0.4);
+  cursor: help;
 }
 .fp {
   font-family: var(--pulse-font-mono);

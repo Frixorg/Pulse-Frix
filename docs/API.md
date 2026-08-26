@@ -146,6 +146,12 @@ credentials supplied per request. Requires the `ssh.exec` permission
 - `GET /servers/{id}/ssh/sessions/{sid}/attach` — WebSocket upgrade, authenticated
   by the session cookie. Binary frames carry terminal bytes verbatim; text
   frames carry `resize` and lifecycle messages.
+- `GET /servers/{id}/ssh/sessions/{sid}/stream` and
+  `POST /servers/{id}/ssh/sessions/{sid}/input` — the same session over plain
+  HTTP (server-sent events + POSTs), used when a browser cannot open a
+  WebSocket. The usual cause is a reverse-proxy CSP without `connect-src`,
+  which blocks `wss:` while allowing https. `stream` claims the session exactly
+  as `attach` does.
 - `DELETE /servers/{id}/ssh/sessions/{sid}` — end the session.
 
 `ssh.connect`, `ssh.disconnect` and `ssh.setup` are audited. See

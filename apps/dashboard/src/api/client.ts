@@ -58,11 +58,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-// sshSocketURL builds the WebSocket URL for a live console. The session cookie
-// authenticates the upgrade, so no token ever appears in the URL.
+// sshSessionPath is the base for one live console. The session cookie
+// authenticates every call, so no token ever appears in a URL.
+function sshSessionPath(serverId: string, sessionId: string): string {
+  return `/api/v1/servers/${encodeURIComponent(serverId)}/ssh/sessions/${encodeURIComponent(sessionId)}`;
+}
+
+/** WebSocket URL for a live console — the fast path. */
 export function sshSocketURL(serverId: string, sessionId: string): string {
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${scheme}//${window.location.host}/api/v1/servers/${encodeURIComponent(serverId)}/ssh/sessions/${encodeURIComponent(sessionId)}/attach`;
+  return `${scheme}//${window.location.host}${sshSessionPath(serverId, sessionId)}/attach`;
+}
+
+/**
+ * Server-sent-events URL for the same console. Used when a WebSocket is not
+ * possible — most often a reverse proxy whose Content-Security-Policy omits
+ * `connect-src`, which blocks `wss:` while allowing plain https.
+ */
+export function sshStreamURL(serverId: string, sessionId: string): string {
+  return `${sshSessionPath(serverId, sessionId)}/stream`;
+}
+
+/** Where the SSE transport posts keystrokes and window sizes. */
+export function sshInputURL(serverId: string, sessionId: string): string {
+  return `${sshSessionPath(serverId, sessionId)}/input`;
 }
 
 export const api = {

@@ -73,6 +73,41 @@ configuration that grants a viewer a shell.
 
 ---
 
+## One-click setup ("Set up SSH on my VPS")
+
+The SSH page has a **Set up SSH on my VPS** button. Give it one working login
+and it makes every later session password-free — you never run anything on the
+server yourself.
+
+What it does, over that one SSH connection:
+
+1. creates `~/.ssh` (mode 700) and `authorized_keys` (600) if they are missing;
+2. generates an ed25519 key and authorises its public half;
+3. restores the SELinux context where that applies;
+4. signs in again with the new key to prove it actually works;
+5. reports the `sshd` settings that decide whether key logins are possible.
+
+The private key is returned to your browser once and stored there (opt-out at
+setup time). It is never written to the Pulse database or logs. A different
+browser simply runs setup again.
+
+**What it will not do.** It never edits `sshd_config`, firewall rules, or any
+other file — a remote `sshd` rewrite is the classic way to lock yourself out, so
+Pulse reports those settings and leaves the decision to you.
+
+**Re-running it is safe.** Setup replaces the key Pulse installed previously,
+matched on its exact comment (`pulse-console@<hostname>`), so repeated runs
+never litter the file. Keys you or your team added are never touched. The
+rewrite goes through a temp file and a rename, so a failure part-way leaves
+`authorized_keys` exactly as it was.
+
+**It needs one login to start.** Pulse is an SSH client here, not an agent
+command — the agent is read-only and never executes anything. If you cannot log
+in at all yet, use your provider's rescue console once to enable SSH, then come
+back.
+
+---
+
 ## Credentials
 
 You type them per session. Pulse:
@@ -142,8 +177,14 @@ Credentials never appear.
 |--------|------|-----------|
 | `GET` | `/api/v1/ssh/capabilities` | `server.read` |
 | `POST` | `/api/v1/servers/{id}/ssh/sessions` | `ssh.exec` |
+| `POST` | `/api/v1/servers/{id}/ssh/setup` | `ssh.exec` |
 | `GET` | `/api/v1/servers/{id}/ssh/sessions/{sid}/attach` | `ssh.exec` |
 | `DELETE` | `/api/v1/servers/{id}/ssh/sessions/{sid}` | `ssh.exec` |
+
+`setup` takes the same body as `sessions` and returns the steps it performed,
+the `sshd` settings it observed, the new public key, and the private key (once).
+`ssh.setup` is audited with the public key installed and whether verification
+passed.
 
 `attach` is a WebSocket upgrade authenticated by the ordinary session cookie —
 no token ever appears in a URL. The wire protocol is deliberately tiny:

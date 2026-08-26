@@ -17,3 +17,8 @@ const Compiled = false
 func Dial(_ context.Context, _ Credentials, _, _ int) (Terminal, string, error) {
 	return nil, "", ErrUnsupported
 }
+
+// InstallKey is the no-op implementation used by the default build.
+func InstallKey(_ context.Context, _ Credentials, _ string) (*SetupResult, error) {
+	return nil, ErrUnsupported
+}

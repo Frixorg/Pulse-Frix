@@ -259,3 +259,21 @@ export interface SSHSession {
   first_connection: boolean;
   attach_within_sec: number;
 }
+
+/** One thing the SSH setup routine did, skipped or found on the host. */
+export interface SSHSetupStep {
+  name: string;
+  status: "ok" | "skipped" | "warn" | "error";
+  detail: string;
+}
+
+export interface SSHSetupResult {
+  steps: SSHSetupStep[];
+  info: Record<string, string>;
+  public_key: string;
+  /** OpenSSH private key, returned once. The control plane never stores it. */
+  private_key: string;
+  fingerprint: string;
+  verified: boolean;
+  warnings?: string[];
+}

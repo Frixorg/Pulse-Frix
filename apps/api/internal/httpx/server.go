@@ -116,6 +116,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/ssh/capabilities", s.requirePerm(rbac.ServerRead, s.handleSSHCapabilities))
 	mux.Handle("POST /api/v1/servers/{id}/ssh/sessions",
 		s.sshLimiter.Middleware()(s.requirePerm(rbac.SSHExec, s.handleSSHOpen)))
+	mux.Handle("POST /api/v1/servers/{id}/ssh/setup",
+		s.sshLimiter.Middleware()(s.requirePerm(rbac.SSHExec, s.handleSSHSetup)))
 	mux.HandleFunc("GET /api/v1/servers/{id}/ssh/sessions/{sid}/attach", s.requirePerm(rbac.SSHExec, s.handleSSHAttach))
 	mux.HandleFunc("DELETE /api/v1/servers/{id}/ssh/sessions/{sid}", s.requirePerm(rbac.SSHExec, s.handleSSHClose))
 

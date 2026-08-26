@@ -7,7 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { useServersStore } from "@/stores/servers";
 import { api, sshSocketURL, ApiError } from "@/api/client";
-import type { SSHCapabilities, SSHAuthMethod } from "@/api/types";
+import type { SSHCapabilities, SSHAuthMethod, SSHSetupResult, SSHSetupStep, Resource } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -34,15 +34,22 @@ async function loadCaps() {
 
 type Phase = "idle" | "connecting" | "connected" | "ended";
 
+// "pulse" means: use the key Pulse installed on this host during setup, so the
+// operator types nothing at all.
+type AuthMode = "pulse" | "password" | "key";
+
 const phase = ref<Phase>("idle");
 const host = ref("");
 const port = ref(22);
 const username = ref("root");
-const authMethod = ref<SSHAuthMethod>("password");
+const authMode = ref<AuthMode>("password");
 const password = ref("");
 const privateKey = ref("");
 const passphrase = ref("");
 const remember = ref(true);
+
+// What actually goes on the wire: a Pulse-installed key is still key auth.
+const authMethod = computed<SSHAuthMethod>(() => (authMode.value === "password" ? "password" : "key"));
 
 const error = ref("");
 const errorCode = ref("");
@@ -57,7 +64,7 @@ interface Profile {
   host: string;
   port: number;
   username: string;
-  authMethod: SSHAuthMethod;
+  authMethod: AuthMode;
 }
 
 // Connection details (never secrets) are remembered per server so the second
@@ -88,14 +95,15 @@ function loadProfile() {
     host.value = p.host;
     port.value = p.port || 22;
     username.value = p.username || "root";
-    authMethod.value = p.authMethod === "key" ? "key" : "password";
+    authMode.value = p.authMethod === "key" || p.authMethod === "pulse" ? p.authMethod : "password";
+    if (authMode.value === "pulse" && !storedKey.value) authMode.value = "password";
     return;
   }
   // Sensible default: the hostname the agent reported for this server.
   host.value = selected.value?.hostname ?? "";
   port.value = 22;
   username.value = "root";
-  authMethod.value = "password";
+  authMode.value = "password";
 }
 function saveProfile() {
   if (!remember.value || !selected.value) return;
@@ -104,7 +112,7 @@ function saveProfile() {
     host: host.value,
     port: port.value,
     username: username.value,
-    authMethod: authMethod.value,
+    authMethod: authMode.value,
   };
   writeJSON(PROFILE_KEY, all);
 }
@@ -130,11 +138,147 @@ function forgetKey() {
   error.value = "";
 }
 
+// --- keys Pulse installed on the host -----------------------------------------
+
+const KEYS_KEY = "pulse-ssh-keys";
+
+// The private key Pulse generated during setup lives in this browser only. It
+// is what makes later logins one click; a different browser sets up again.
+const keyStoreVersion = ref(0); // bumped to re-read localStorage reactively
+
+function keyName() {
+  return `${username.value}@${host.value}:${port.value}`;
+}
+const storedKey = computed(() => {
+  keyStoreVersion.value; // dependency
+  if (!host.value || !username.value) return "";
+  return readJSON<Record<string, string>>(KEYS_KEY, {})[keyName()] ?? "";
+});
+function saveKey(pem: string) {
+  const all = readJSON<Record<string, string>>(KEYS_KEY, {});
+  all[keyName()] = pem;
+  writeJSON(KEYS_KEY, all);
+  keyStoreVersion.value++;
+}
+function forgetStoredKey() {
+  const all = readJSON<Record<string, string>>(KEYS_KEY, {});
+  delete all[keyName()];
+  writeJSON(KEYS_KEY, all);
+  keyStoreVersion.value++;
+  if (authMode.value === "pulse") authMode.value = "password";
+}
+function downloadKey() {
+  const blob = new Blob([storedKey.value], { type: "application/x-pem-file" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pulse-${username.value}-${host.value}.key`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Prefer the installed key whenever one exists for these exact details.
+watch(storedKey, (key) => {
+  if (key && authMode.value === "password" && !password.value) authMode.value = "pulse";
+  if (!key && authMode.value === "pulse") authMode.value = "password";
+});
+
 const canSubmit = computed(() => {
   if (phase.value === "connecting") return false;
   if (!host.value.trim() || !username.value.trim()) return false;
-  return authMethod.value === "password" ? password.value.length > 0 : privateKey.value.trim().length > 0;
+  switch (authMode.value) {
+    case "pulse":
+      return storedKey.value.length > 0;
+    case "password":
+      return password.value.length > 0;
+    default:
+      return privateKey.value.trim().length > 0;
+  }
 });
+
+// --- one-click setup ----------------------------------------------------------
+
+const setupOpen = ref(false);
+const setupRunning = ref(false);
+const setupResult = ref<SSHSetupResult | null>(null);
+const setupError = ref("");
+const setupSteps = ref<SSHSetupStep[]>([]);
+const saveKeyHere = ref(true);
+
+// Read-only facts Pulse already has from discovery — no connection needed, and
+// they usually explain why a login is being refused.
+const precheck = ref<{ port?: string; passwordAuth?: string; rootLogin?: string; emptyPass?: string } | null>(null);
+
+async function loadPrecheck() {
+  precheck.value = null;
+  if (!selected.value) return;
+  try {
+    const snap = await api.discovery(selected.value.id);
+    const resources: Resource[] = snap.resources ?? [];
+    const cfg = resources.find((r) => r.type === "ssh_config");
+    const listener = resources.find(
+      (r) => r.type === "listening_port" && String(r.attributes?.process ?? r.name ?? "").includes("ssh"),
+    );
+    if (!cfg && !listener) return;
+    precheck.value = {
+      port: listener ? String(listener.attributes?.port ?? "") : "",
+      passwordAuth: cfg ? String(cfg.attributes?.password_authentication ?? "") : "",
+      rootLogin: cfg ? String(cfg.attributes?.permit_root_login ?? "") : "",
+      emptyPass: cfg ? String(cfg.attributes?.permit_empty_passwords ?? "") : "",
+    };
+  } catch {
+    /* the precheck is a bonus; setup does not depend on it */
+  }
+}
+
+// canSetUp deliberately requires a password or a key the operator typed: Pulse
+// has no other way onto the box. The agent is read-only and never runs commands.
+const canSetUp = computed(() => {
+  if (setupRunning.value || !host.value.trim() || !username.value.trim()) return false;
+  return authMode.value === "password" ? password.value.length > 0 : privateKey.value.trim().length > 0;
+});
+
+async function runSetup() {
+  if (!selected.value || !canSetUp.value) return;
+  setupRunning.value = true;
+  setupError.value = "";
+  setupResult.value = null;
+  setupSteps.value = [];
+  setupOpen.value = true;
+  try {
+    const result = await api.setupSSH(selected.value.id, {
+      host: host.value.trim(),
+      port: Number(port.value) || 22,
+      username: username.value.trim(),
+      auth_method: authMethod.value,
+      password: authMode.value === "password" ? password.value : undefined,
+      private_key: authMode.value === "key" ? privateKey.value : undefined,
+      passphrase: authMode.value === "key" ? passphrase.value : undefined,
+      known_fingerprint: pinnedKey() || undefined,
+      cols: 80,
+      rows: 24,
+    });
+    setupResult.value = result;
+    setupSteps.value = result.steps ?? [];
+    if (result.fingerprint) pinKey(result.fingerprint);
+    if (saveKeyHere.value && result.private_key) {
+      saveKey(result.private_key);
+      authMode.value = "pulse";
+      password.value = "";
+    }
+    saveProfile();
+  } catch (e) {
+    if (e instanceof ApiError) {
+      setupError.value = e.message;
+      const steps = e.details?.steps;
+      if (Array.isArray(steps)) setupSteps.value = steps as SSHSetupStep[];
+    } else {
+      setupError.value = "Setup could not run.";
+    }
+  } finally {
+    setupRunning.value = false;
+  }
+}
 
 // --- terminal ---------------------------------------------------------------
 
@@ -283,9 +427,9 @@ async function connect() {
       port: Number(port.value) || 22,
       username: username.value.trim(),
       auth_method: authMethod.value,
-      password: authMethod.value === "password" ? password.value : undefined,
-      private_key: authMethod.value === "key" ? privateKey.value : undefined,
-      passphrase: authMethod.value === "key" ? passphrase.value : undefined,
+      password: authMode.value === "password" ? password.value : undefined,
+      private_key: authMode.value === "pulse" ? storedKey.value : authMode.value === "key" ? privateKey.value : undefined,
+      passphrase: authMode.value === "key" ? passphrase.value : undefined,
       known_fingerprint: pinnedKey() || undefined,
       cols,
       rows,
@@ -414,6 +558,7 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   loadCaps();
   loadProfile();
+  loadPrecheck();
   window.addEventListener("keydown", onKeydown);
 });
 
@@ -431,6 +576,10 @@ onBeforeUnmount(() => {
 watch(selected, () => {
   if (phase.value === "connected") disconnect();
   loadProfile();
+  loadPrecheck();
+  setupResult.value = null;
+  setupSteps.value = [];
+  setupError.value = "";
 });
 
 const statusLabel = computed(() => {
@@ -531,12 +680,29 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
           </label>
         </div>
 
+        <!-- Once setup has run, this host needs no credentials at all. -->
+        <div v-if="storedKey" class="key-strip">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          <span class="key-strip-t">
+            Pulse set this host up — <strong>{{ keyName() }}</strong> signs in with a key, no password.
+          </span>
+          <div class="key-strip-actions">
+            <button class="link-btn" @click="downloadKey">Download key</button>
+            <button class="link-btn danger" @click="forgetStoredKey">Forget</button>
+          </div>
+        </div>
+
         <div class="auth-row">
           <div class="seg" role="group" aria-label="Authentication method">
-            <button class="seg-b" :class="{ on: authMethod === 'password' }" @click="authMethod = 'password'">
+            <button v-if="storedKey" class="seg-b" :class="{ on: authMode === 'pulse' }" @click="authMode = 'pulse'">
+              Pulse key
+            </button>
+            <button class="seg-b" :class="{ on: authMode === 'password' }" @click="authMode = 'password'">
               Password
             </button>
-            <button class="seg-b" :class="{ on: authMethod === 'key' }" @click="authMethod = 'key'">
+            <button class="seg-b" :class="{ on: authMode === 'key' }" @click="authMode = 'key'">
               Private key
             </button>
           </div>
@@ -546,7 +712,11 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
           </label>
         </div>
 
-        <label v-if="authMethod === 'password'" class="field">
+        <p v-if="authMode === 'pulse'" class="pulse-auth">
+          Using the key Pulse installed on this host. It is stored in this browser only — nothing to type.
+        </p>
+
+        <label v-if="authMode === 'password'" class="field">
           <span class="lbl">Password</span>
           <input
             v-model="password"
@@ -558,7 +728,7 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
           />
         </label>
 
-        <template v-else>
+        <template v-else-if="authMode === 'key'">
           <label class="field">
             <span class="lbl">Private key (OpenSSH format)</span>
             <textarea
@@ -598,12 +768,96 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
         <div v-else-if="error" class="alert">{{ error }}</div>
 
         <div class="form-actions">
+          <button class="setup-btn" :disabled="!canSetUp" @click="runSetup">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+            </svg>
+            {{ setupRunning ? "Setting up…" : "Set up SSH on my VPS" }}
+          </button>
           <button class="connect" :disabled="!canSubmit" @click="connect">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2">
               <path d="M4 17l6-5-6-5M12 19h8" />
             </svg>
             Connect
           </button>
+        </div>
+
+        <!-- One-click setup: Pulse signs in once and authorises its own key, so
+             every later session needs nothing typed. -->
+        <div class="setup" :class="{ open: setupOpen }">
+          <button class="setup-head" @click="setupOpen = !setupOpen">
+            <span class="setup-caret" :class="{ open: setupOpen }" aria-hidden="true">›</span>
+            <span class="setup-title">Set up SSH on my VPS</span>
+            <span class="setup-hint">what it does, and what Pulse already sees</span>
+          </button>
+
+          <div v-if="setupOpen" class="setup-body">
+            <p class="setup-p">
+              Pulse signs in once with the details above, then authorises a key it generates for you.
+              <strong>You do not run anything on the VPS.</strong> After that, connecting is one click —
+              no password.
+            </p>
+
+            <ul class="setup-list">
+              <li><span class="tick">✓</span> Creates <code>~/.ssh</code> (mode 700) and <code>authorized_keys</code> (600) if missing</li>
+              <li><span class="tick">✓</span> Appends one public key — a no-op if it is already there</li>
+              <li><span class="tick">✓</span> Restores the SELinux context where that applies</li>
+              <li><span class="tick">✓</span> Signs in again with the new key to prove it works</li>
+              <li><span class="cross">✗</span> Never edits <code>sshd_config</code>, the firewall, or any other file</li>
+            </ul>
+
+            <!-- Read-only facts the agent already reported: usually the answer
+                 to "why is it refusing me?". -->
+            <div v-if="precheck" class="pre">
+              <div class="pre-h">What Pulse already sees on this VPS</div>
+              <dl class="pre-grid">
+                <div v-if="precheck.port"><dt>sshd port</dt><dd>{{ precheck.port }}</dd></div>
+                <div v-if="precheck.passwordAuth">
+                  <dt>PasswordAuthentication</dt>
+                  <dd :class="{ bad: precheck.passwordAuth === 'no' }">{{ precheck.passwordAuth }}</dd>
+                </div>
+                <div v-if="precheck.rootLogin">
+                  <dt>PermitRootLogin</dt>
+                  <dd :class="{ bad: precheck.rootLogin === 'no' }">{{ precheck.rootLogin }}</dd>
+                </div>
+              </dl>
+              <p v-if="precheck.passwordAuth === 'no' && authMode === 'password'" class="pre-warn">
+                This host has password logins switched off — use a private key for the one-off setup login.
+              </p>
+            </div>
+
+            <label class="remember">
+              <input v-model="saveKeyHere" type="checkbox" />
+              Save the key in this browser so future sessions need no password
+            </label>
+
+            <p class="setup-note">
+              Pulse needs one working login to do this — it is an SSH client, not an agent command.
+              The agent stays read-only and never runs anything. If you cannot log in at all yet, use
+              your provider's rescue console once to enable SSH, then come back here.
+            </p>
+
+            <button class="setup-run" :disabled="!canSetUp" @click="runSetup">
+              {{ setupRunning ? "Setting up…" : "Configure now" }}
+            </button>
+
+            <!-- Outcome -->
+            <div v-if="setupError" class="alert">{{ setupError }}</div>
+            <ol v-if="setupSteps.length" class="steps">
+              <li v-for="(st, i) in setupSteps" :key="i" class="step-row" :class="st.status">
+                <span class="step-badge">{{ st.status }}</span>
+                <span class="step-detail">{{ st.detail }}</span>
+              </li>
+            </ol>
+            <div v-if="setupResult" class="result" :class="{ ok: setupResult.verified }">
+              <div class="result-t">
+                {{ setupResult.verified ? "Ready — this VPS now signs in with a key" : "Key installed, but the test login did not succeed" }}
+              </div>
+              <p v-for="(wmsg, i) in setupResult.warnings ?? []" :key="i" class="result-w">{{ wmsg }}</p>
+              <code class="result-key">{{ setupResult.public_key }}</code>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -888,6 +1142,288 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
 .form-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* --- the key Pulse installed --- */
+.key-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(199, 245, 66, 0.08);
+  border: 1px solid rgba(199, 245, 66, 0.35);
+  color: var(--pulse-accent);
+}
+.key-strip-t {
+  flex: 1;
+  min-width: 200px;
+  font-size: 12.5px;
+  color: var(--pulse-text);
+}
+.key-strip-actions {
+  display: flex;
+  gap: 10px;
+}
+.link-btn {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-family: var(--pulse-font-mono);
+  font-size: 11.5px;
+  color: var(--pulse-text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-btn:hover {
+  color: var(--pulse-text);
+}
+.link-btn.danger:hover {
+  color: var(--pulse-down);
+}
+.pulse-auth {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pulse-text-muted);
+}
+
+/* --- setup panel --- */
+.setup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  background: var(--pulse-surface-2);
+  border: 1px solid var(--pulse-border);
+  color: var(--pulse-text);
+  font-family: var(--pulse-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  margin-right: auto;
+}
+.setup-btn:hover:not(:disabled) {
+  border-color: var(--pulse-accent);
+}
+.setup-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.setup {
+  border-top: 1px solid var(--pulse-border);
+  margin-top: 2px;
+  padding-top: 12px;
+}
+.setup-head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--pulse-text);
+}
+.setup-caret {
+  display: inline-block;
+  transition: transform 0.15s;
+  color: var(--pulse-text-muted);
+}
+.setup-caret.open {
+  transform: rotate(90deg);
+}
+.setup-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.setup-hint {
+  font-size: 11.5px;
+  color: var(--pulse-text-muted);
+}
+.setup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 0 2px 20px;
+}
+.setup-p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--pulse-text-muted);
+}
+.setup-p strong {
+  color: var(--pulse-text);
+}
+.setup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--pulse-text-muted);
+}
+.setup-list li {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+}
+.setup-list code {
+  font-family: var(--pulse-font-mono);
+  font-size: 11.5px;
+  background: var(--pulse-solid-2);
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: var(--pulse-text);
+}
+.tick {
+  color: var(--pulse-healthy);
+}
+.cross {
+  color: var(--pulse-down);
+}
+.pre {
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: var(--pulse-surface-2);
+  border: 1px solid var(--pulse-border);
+}
+.pre-h {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pulse-text-muted);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.pre-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+.pre-grid div {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.pre-grid dt {
+  font-size: 11.5px;
+  color: var(--pulse-text-muted);
+}
+.pre-grid dd {
+  margin: 0;
+  font-family: var(--pulse-font-mono);
+  font-size: 11.5px;
+  color: var(--pulse-text);
+}
+.pre-grid dd.bad {
+  color: var(--pulse-degraded);
+}
+.pre-warn {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  color: var(--pulse-degraded);
+}
+.setup-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--pulse-text-muted);
+}
+.setup-run {
+  align-self: flex-start;
+  padding: 9px 18px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--pulse-accent);
+  color: var(--pulse-accent-ink);
+  font-family: var(--pulse-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+.setup-run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.step-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12.5px;
+  color: var(--pulse-text);
+}
+.step-badge {
+  flex-shrink: 0;
+  width: 62px;
+  font-family: var(--pulse-font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding: 2px 0;
+  border-radius: 999px;
+  border: 1px solid var(--pulse-border);
+  color: var(--pulse-text-muted);
+}
+.step-row.ok .step-badge {
+  color: var(--pulse-healthy);
+  border-color: rgba(52, 211, 153, 0.4);
+}
+.step-row.warn .step-badge {
+  color: var(--pulse-degraded);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+.step-row.error .step-badge {
+  color: var(--pulse-down);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+.result {
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--pulse-border);
+  background: var(--pulse-surface-2);
+}
+.result.ok {
+  border-color: rgba(199, 245, 66, 0.4);
+  background: rgba(199, 245, 66, 0.07);
+}
+.result-t {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.result-w {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--pulse-degraded);
+}
+.result-key {
+  display: block;
+  font-family: var(--pulse-font-mono);
+  font-size: 10.5px;
+  color: var(--pulse-text-muted);
+  word-break: break-all;
+  line-height: 1.5;
 }
 .connect {
   display: inline-flex;

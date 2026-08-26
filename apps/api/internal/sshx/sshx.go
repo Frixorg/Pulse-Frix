@@ -63,6 +63,26 @@ type Credentials struct {
 	KnownFingerprint string
 }
 
+// SetupStep is one thing the setup routine did, skipped or found on the host.
+// It is shown to the operator verbatim, so keep the wording plain.
+type SetupStep struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // ok | skipped | warn | error
+	Detail string `json:"detail"`
+}
+
+// SetupResult is what one-click setup accomplished. PrivateKey is handed to the
+// browser exactly once and is never persisted by the control plane.
+type SetupResult struct {
+	Steps       []SetupStep       `json:"steps"`
+	Info        map[string]string `json:"info"` // sshd settings observed, never changed
+	PublicKey   string            `json:"public_key"`
+	PrivateKey  string            `json:"private_key"`
+	Fingerprint string            `json:"fingerprint"`
+	Verified    bool              `json:"verified"` // a fresh login with the new key worked
+	Warnings    []string          `json:"warnings"`
+}
+
 // Terminal is a live interactive shell on a remote host.
 type Terminal interface {
 	// Read returns the remote terminal's output (stdout and stderr merged by
@@ -217,6 +237,17 @@ func (m *Manager) Open(ctx context.Context, orgID, userID, serverID string, c Cr
 	m.sessions[id] = s
 	m.mu.Unlock()
 	return s, fingerprint, nil
+}
+
+// Setup installs a Pulse-generated key so later logins need no password. It
+// changes exactly one thing on the host — an entry in the user's
+// authorized_keys — and only reports (never edits) sshd's own configuration:
+// rewriting sshd_config remotely is how people lock themselves out.
+func (m *Manager) Setup(ctx context.Context, c Credentials, label string) (*SetupResult, error) {
+	if err := m.Unavailable(); err != nil {
+		return nil, err
+	}
+	return InstallKey(ctx, c, label)
 }
 
 // Get returns a session owned by this user.

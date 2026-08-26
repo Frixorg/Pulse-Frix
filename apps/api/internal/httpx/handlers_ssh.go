@@ -85,41 +85,12 @@ func (s *Server) handleSSHOpen(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeValidation, "invalid request body")
 		return
 	}
-	host := strings.TrimSpace(req.Host)
-	user := strings.TrimSpace(req.Username)
-	if host == "" {
-		Fail(w, r, http.StatusBadRequest, CodeValidation, "a host or IP address is required")
+	creds, verr := credentialsFrom(&req)
+	if verr != "" {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, verr)
 		return
 	}
-	if strings.Contains(host, "/") || strings.Contains(host, " ") {
-		Fail(w, r, http.StatusBadRequest, CodeValidation, "host must be a hostname or IP address, not a URL")
-		return
-	}
-	if user == "" {
-		Fail(w, r, http.StatusBadRequest, CodeValidation, "a username is required")
-		return
-	}
-	port := req.Port
-	if port == 0 {
-		port = 22
-	}
-	if port < 1 || port > 65535 {
-		Fail(w, r, http.StatusBadRequest, CodeValidation, "port must be between 1 and 65535")
-		return
-	}
-
-	creds := sshx.Credentials{
-		Host:             host,
-		Port:             port,
-		User:             user,
-		KnownFingerprint: strings.TrimSpace(req.KnownFingerprint),
-	}
-	if req.AuthMethod == "key" {
-		creds.PrivateKey = req.PrivateKey
-		creds.Passphrase = req.Passphrase
-	} else {
-		creds.Password = req.Password
-	}
+	host, user, port := creds.Host, creds.User, creds.Port
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
@@ -158,6 +129,104 @@ func (s *Server) handleSSHOpen(w http.ResponseWriter, r *http.Request) {
 		FirstConnection: req.KnownFingerprint == "",
 		AttachWithinSec: 60,
 	})
+}
+
+// handleSSHSetup is the "Set up SSH on my VPS" button. Using one login the
+// operator supplies, it authorises a freshly generated key on the host so every
+// later console session needs no password.
+//
+// It touches exactly one file — the user's own authorized_keys — and never
+// edits sshd_config: a remote sshd rewrite is how people lock themselves out.
+// The generated private key is returned to the browser once and is not stored
+// by the control plane.
+func (s *Server) handleSSHSetup(w http.ResponseWriter, r *http.Request) {
+	p := s.principal(r)
+	if err := s.ssh.Unavailable(); err != nil {
+		Fail(w, r, http.StatusNotImplemented, CodeConfig, err.Error())
+		return
+	}
+	srv, err := s.store.GetServer(p.OrgID, r.PathValue("id"))
+	if err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "server not found")
+		return
+	}
+
+	var req sshOpenRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, "invalid request body")
+		return
+	}
+	creds, verr := credentialsFrom(&req)
+	if verr != "" {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, verr)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	result, err := s.ssh.Setup(ctx, creds, srv.Hostname)
+	creds.Password, creds.PrivateKey, creds.Passphrase = "", "", ""
+	if err != nil {
+		s.audit.Record(p.OrgID, p.Email, "ssh.setup", "failure", clientIP(r), map[string]any{
+			"server": srv.ID, "host": creds.Host, "port": creds.Port, "username": creds.User,
+			"error": err.Error(),
+		})
+		status, code := sshFailure(err)
+		if result != nil {
+			// Partial progress is still worth showing: the operator can see how
+			// far setup got before it stopped.
+			JSON(w, status, map[string]any{"error": map[string]any{
+				"code": code, "message": err.Error(), "request_id": RequestID(r.Context()),
+				"steps": result.Steps, "info": result.Info,
+			}})
+			return
+		}
+		Fail(w, r, status, code, err.Error())
+		return
+	}
+
+	s.audit.Record(p.OrgID, p.Email, "ssh.setup", "success", clientIP(r), map[string]any{
+		"server": srv.ID, "host": creds.Host, "port": creds.Port, "username": creds.User,
+		"public_key": result.PublicKey, "verified": result.Verified,
+	})
+	JSON(w, http.StatusOK, result)
+}
+
+// credentialsFrom validates a request body and builds Credentials. It returns a
+// non-empty string describing the problem when the body is unusable.
+func credentialsFrom(req *sshOpenRequest) (sshx.Credentials, string) {
+	host := strings.TrimSpace(req.Host)
+	user := strings.TrimSpace(req.Username)
+	switch {
+	case host == "":
+		return sshx.Credentials{}, "a host or IP address is required"
+	case strings.Contains(host, "/") || strings.Contains(host, " "):
+		return sshx.Credentials{}, "host must be a hostname or IP address, not a URL"
+	case user == "":
+		return sshx.Credentials{}, "a username is required"
+	}
+	port := req.Port
+	if port == 0 {
+		port = 22
+	}
+	if port < 1 || port > 65535 {
+		return sshx.Credentials{}, "port must be between 1 and 65535"
+	}
+
+	creds := sshx.Credentials{
+		Host:             host,
+		Port:             port,
+		User:             user,
+		KnownFingerprint: strings.TrimSpace(req.KnownFingerprint),
+	}
+	if req.AuthMethod == "key" {
+		creds.PrivateKey = req.PrivateKey
+		creds.Passphrase = req.Passphrase
+	} else {
+		creds.Password = req.Password
+	}
+	return creds, ""
 }
 
 // handleSSHAttach upgrades to a WebSocket and pumps bytes both ways.

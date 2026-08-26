@@ -21,6 +21,7 @@ import type {
   SSHCapabilities,
   SSHOpenRequest,
   SSHSession,
+  SSHSetupResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -114,6 +115,8 @@ export const api = {
   sshCapabilities: () => request<SSHCapabilities>("/ssh/capabilities"),
   openSSHSession: (id: string, body: SSHOpenRequest) =>
     request<SSHSession>(`/servers/${id}/ssh/sessions`, { method: "POST", body: JSON.stringify(body) }),
+  setupSSH: (id: string, body: SSHOpenRequest) =>
+    request<SSHSetupResult>(`/servers/${id}/ssh/setup`, { method: "POST", body: JSON.stringify(body) }),
   closeSSHSession: (id: string, sid: string) =>
     request<{ status: string }>(`/servers/${id}/ssh/sessions/${sid}`, { method: "DELETE" }),
 

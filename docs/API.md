@@ -135,12 +135,18 @@ Off unless `PULSE_SSH_CONSOLE=true` **and** the binary was built with
   `session_id` and the host key `fingerprint`. Credentials are used once and
   never stored, logged or audited. A changed host key returns `409
   SSH_HOST_KEY_MISMATCH` with the fingerprint actually offered.
+- `POST /servers/{id}/ssh/setup` — one-click setup. Using the same credentials,
+  authorises a freshly generated key on the host so later sessions need no
+  password. Returns the steps performed, the `sshd` settings observed, the
+  public key, and the private key (returned once, never stored). It appends to
+  the user's `authorized_keys` only, replacing any key Pulse installed before,
+  and never edits `sshd_config`.
 - `GET /servers/{id}/ssh/sessions/{sid}/attach` — WebSocket upgrade, authenticated
   by the session cookie. Binary frames carry terminal bytes verbatim; text
   frames carry `resize` and lifecycle messages.
 - `DELETE /servers/{id}/ssh/sessions/{sid}` — end the session.
 
-`ssh.connect` and `ssh.disconnect` are audited. See
+`ssh.connect`, `ssh.disconnect` and `ssh.setup` are audited. See
 [SSH_CONSOLE.md](./SSH_CONSOLE.md).
 
 ### Audit — `/api/v1/audit`

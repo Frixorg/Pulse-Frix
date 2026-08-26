@@ -20,7 +20,6 @@ const events = ref<EventItem[]>([]);
 const cpu = ref<MetricSeries[]>([]);
 const mem = ref<MetricSeries[]>([]);
 const loading = ref(false);
-const lastUpdated = ref<number | null>(null);
 const error = ref("");
 
 const c = computed(() => summary.value?.counts);
@@ -44,7 +43,6 @@ async function load() {
     events.value = ev.data;
     cpu.value = cpuM.series;
     mem.value = memM.series;
-    lastUpdated.value = Date.now();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "failed to refresh";
   } finally {
@@ -75,12 +73,9 @@ watch(selected, load);
               busy-label="Re-checking…"
               title="Re-run the check: pull the newest report the agent has sent for this server"
               :loading="loading"
-              :updated-at="lastUpdated"
+              :show-age="false"
               @refresh="refresh"
             />
-            <span v-if="summary?.server?.last_seen_at" class="agent-age">
-              Agent last reported {{ timeAgo(summary.server.last_seen_at) }}
-            </span>
             <span v-if="error" class="head-err">{{ error }}</span>
           </div>
         </template>
@@ -163,11 +158,6 @@ watch(selected, load);
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-}
-.agent-age {
-  font-size: 11.5px;
-  font-family: var(--pulse-font-mono);
-  color: var(--pulse-text-muted);
 }
 .head-err {
   font-size: 11.5px;

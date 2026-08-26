@@ -10,6 +10,9 @@ const servers = useServersStore();
 const route = useRoute();
 const sidebarOpen = ref(false);
 
+// Component names, not route names.
+const KEEP_ALIVE = ["SshView"];
+
 onMounted(() => servers.load());
 watch(() => route.fullPath, () => (sidebarOpen.value = false));
 </script>
@@ -23,7 +26,15 @@ watch(() => route.fullPath, () => (sidebarOpen.value = false));
       <div class="col">
         <AppTopbar @menu="sidebarOpen = true" />
         <main class="main">
-          <RouterView />
+          <!-- The SSH console owns a live connection and a terminal buffer, so
+               it must survive navigation: unmounting it would drop the session
+               the moment you glance at another page. Everything else is cheap
+               to rebuild and is deliberately not cached. -->
+          <RouterView v-slot="{ Component }">
+            <KeepAlive :include="KEEP_ALIVE">
+              <component :is="Component" />
+            </KeepAlive>
+          </RouterView>
         </main>
       </div>
     </div>

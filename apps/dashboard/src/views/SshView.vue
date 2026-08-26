@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, onActivated, nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -12,6 +12,10 @@ import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import CheckBox from "@/components/CheckBox.vue";
 import PasswordField from "@/components/PasswordField.vue";
+
+// Named so AppShell can keep this view alive: a live terminal must not be
+// torn down just because the operator looked at another page.
+defineOptions({ name: "SshView" });
 
 const servers = useServersStore();
 const { selected } = storeToRefs(servers);
@@ -91,6 +95,18 @@ function profileKeyFor(serverId: string) {
   return serverId || "default";
 }
 function loadProfile() {
+  restoring = true;
+  try {
+    applyProfile();
+  } finally {
+    // Let the assignments settle before the watcher listens again.
+    nextTick(() => {
+      restoring = false;
+    });
+  }
+}
+
+function applyProfile() {
   const all = readJSON<Record<string, Profile>>(PROFILE_KEY, {});
   const p = selected.value ? all[profileKeyFor(selected.value.id)] : undefined;
   if (p) {
@@ -108,16 +124,31 @@ function loadProfile() {
   authMode.value = "password";
 }
 function saveProfile() {
-  if (!remember.value || !selected.value) return;
+  if (!selected.value) return;
   const all = readJSON<Record<string, Profile>>(PROFILE_KEY, {});
-  all[profileKeyFor(selected.value.id)] = {
-    host: host.value,
-    port: port.value,
-    username: username.value,
-    authMethod: authMode.value,
-  };
+  const key = profileKeyFor(selected.value.id);
+  // Unticking the box is an instruction to forget, not just to stop saving.
+  if (!remember.value) {
+    delete all[key];
+  } else {
+    all[key] = {
+      host: host.value,
+      port: port.value,
+      username: username.value,
+      authMethod: authMode.value,
+    };
+  }
   writeJSON(PROFILE_KEY, all);
 }
+
+// Persist as the operator types, not only after a successful connect: a first
+// attempt that fails is exactly when you least want to retype the details.
+// `restoring` stops the watcher echoing values straight back while loading.
+let restoring = false;
+watch([host, port, username, authMode, remember], () => {
+  if (restoring) return;
+  saveProfile();
+});
 
 // Host-key pinning: trust on first use, then refuse a changed key until the
 // operator explicitly accepts it.
@@ -185,6 +216,30 @@ watch(storedKey, (key) => {
   if (!key && authMode.value === "pulse") authMode.value = "password";
 });
 
+// People paste `ssh://root@host:2222`, `root@host`, `host:2222` or a URL with a
+// trailing slash. Splitting those into the right fields is friendlier than
+// rejecting them, and it removes a whole class of confusing 400s.
+function normaliseTarget() {
+  let raw = host.value.trim();
+  if (!raw) return;
+  raw = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, ""); // ssh://, https:// ...
+  raw = raw.replace(/\/.*$/, ""); // any path
+  const at = raw.lastIndexOf("@");
+  if (at > 0) {
+    const user = raw.slice(0, at).trim();
+    if (user) username.value = user;
+    raw = raw.slice(at + 1);
+  }
+  // host:port, but never split an IPv6 literal like [::1]:22 in the wrong place.
+  const m = /^(\[[^\]]+\]|[^:]+):(\d{1,5})$/.exec(raw);
+  if (m) {
+    raw = m[1];
+    const p = Number(m[2]);
+    if (p >= 1 && p <= 65535) port.value = p;
+  }
+  host.value = raw.replace(/^\[|\]$/g, "");
+}
+
 const canSubmit = computed(() => {
   if (phase.value === "connecting") return false;
   if (!host.value.trim() || !username.value.trim()) return false;
@@ -241,7 +296,9 @@ const canSetUp = computed(() => {
 });
 
 async function runSetup() {
-  if (!selected.value || !canSetUp.value) return;
+  if (!selected.value) return;
+  normaliseTarget();
+  if (!canSetUp.value) return;
   setupRunning.value = true;
   setupError.value = "";
   setupResult.value = null;
@@ -407,7 +464,9 @@ function writeNotice(text: string) {
 // --- connect / disconnect ---------------------------------------------------
 
 async function connect() {
-  if (!selected.value || !canSubmit.value) return;
+  if (!selected.value) return;
+  normaliseTarget();
+  if (!canSubmit.value) return;
   error.value = "";
   errorCode.value = "";
   seenFingerprint.value = "";
@@ -449,7 +508,8 @@ async function connect() {
       errorCode.value = e.code;
       seenFingerprint.value = String(e.details?.fingerprint ?? "");
     } else {
-      error.value = "Could not open the session.";
+      error.value = "Could not reach the Pulse API to open the session.";
+      errorCode.value = "NETWORK";
     }
   }
 }
@@ -744,6 +804,17 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown);
 });
 
+// The view is cached, so returning to it does not remount. Re-fit the terminal
+// (the window may have changed size while it was hidden) and take focus back.
+onActivated(() => {
+  if (phase.value !== "idle") {
+    nextTick(() => {
+      refit();
+      focusTerminal();
+    });
+  }
+});
+
 onBeforeUnmount(() => {
   stopWatchingCSP();
   window.removeEventListener("keydown", onKeydown);
@@ -840,7 +911,14 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
         <div class="grid-3">
           <label class="field host-field">
             <span class="lbl">Host or IP</span>
-            <input v-model="host" class="input" placeholder="203.0.113.10" autocomplete="off" spellcheck="false" />
+            <input
+              v-model="host"
+              class="input"
+              placeholder="203.0.113.10  ·  root@host:2222 also works"
+              autocomplete="off"
+              spellcheck="false"
+              @blur="normaliseTarget"
+            />
           </label>
           <label class="field">
             <span class="lbl">Port</span>

@@ -113,7 +113,12 @@ You type them per session. Pulse:
 - uses them to open **one** connection and then drops them;
 - **never** writes them to the database, the logs, or an audit record;
 - remembers only the host, port and username on your device (localStorage), and
-  only if you tick *Remember host & username* — never a password or key.
+  only if you tick *Remember host & username* — never a password or key. Those
+  details are saved as you type, so a connection that fails does not cost you
+  the retyping; unticking the box deletes what was stored.
+
+The host box accepts what you are likely to paste — `root@host`, `host:2222`,
+`ssh://root@host:2222/` — and splits it into the right fields.
 
 Both password and private-key (OpenSSH format, with optional passphrase)
 authentication are supported. If `sshd` answers with keyboard-interactive
@@ -152,6 +157,11 @@ The console pins host keys per `host:port` in your browser:
 
 Switching servers in the dashboard ends the session: a shell pointed at the
 wrong host is a hazard, not a convenience.
+
+Moving between **pages** does not. The console is kept alive while you are
+signed in, so you can check a metric or a container and come back to the same
+shell with its scrollback intact. It closes when you sign out, leave the
+dashboard, switch servers, or click Disconnect.
 
 ---
 

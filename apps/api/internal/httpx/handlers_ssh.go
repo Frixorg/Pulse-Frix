@@ -14,9 +14,10 @@ import (
 )
 
 // The SSH console is the one Pulse feature that can change a server, so every
-// entry point here is explicit about it: it is disabled unless the operator
-// turns it on, it needs the ssh.exec permission, and each connection is
-// audited (host, port and username — never the credentials).
+// entry point here is explicit about it: it needs the ssh.exec permission, it
+// can do nothing without credentials supplied on the request, and each
+// connection is audited (host, port and username — never the credentials).
+// A deployment can remove it with PULSE_SSH_CONSOLE=false.
 
 // sshOpenRequest is the body of POST /servers/{id}/ssh/sessions.
 type sshOpenRequest struct {
@@ -108,12 +109,12 @@ func (s *Server) handleSSHOpen(w http.ResponseWriter, r *http.Request) {
 			// Give the UI the fingerprint we actually saw so it can show the
 			// operator both values instead of a bare "mismatch".
 			JSON(w, status, map[string]any{"error": map[string]any{
-				"code": code, "message": err.Error(), "request_id": RequestID(r.Context()),
+				"code": code, "message": sshUserMessage(err), "request_id": RequestID(r.Context()),
 				"fingerprint": fingerprint,
 			}})
 			return
 		}
-		Fail(w, r, status, code, err.Error())
+		Fail(w, r, status, code, sshUserMessage(err))
 		return
 	}
 
@@ -178,12 +179,12 @@ func (s *Server) handleSSHSetup(w http.ResponseWriter, r *http.Request) {
 			// Partial progress is still worth showing: the operator can see how
 			// far setup got before it stopped.
 			JSON(w, status, map[string]any{"error": map[string]any{
-				"code": code, "message": err.Error(), "request_id": RequestID(r.Context()),
+				"code": code, "message": sshUserMessage(err), "request_id": RequestID(r.Context()),
 				"steps": result.Steps, "info": result.Info,
 			}})
 			return
 		}
-		Fail(w, r, status, code, err.Error())
+		Fail(w, r, status, code, sshUserMessage(err))
 		return
 	}
 
@@ -366,6 +367,29 @@ func (s *Server) handleSSHClose(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]string{"status": "closed"})
 }
 
+// sshUserMessage turns a dial error into something worth showing a person.
+// x/crypto's own text ("ssh: handshake failed: ssh: unable to authenticate,
+// attempted methods [none password], no supported methods remain") is precise
+// and useless to the operator, so it stays in the logs and the audit record
+// while the UI gets a sentence that says what to do next.
+func sshUserMessage(err error) string {
+	switch {
+	case errors.Is(err, sshx.ErrAuth):
+		return "The server rejected these credentials. Check the username and password — " +
+			"or use a private key, since many hosts set PasswordAuthentication no."
+	case errors.Is(err, sshx.ErrBadKey):
+		return "That private key could not be read. Paste the whole OpenSSH key including the " +
+			"BEGIN and END lines, and add its passphrase if it has one."
+	case errors.Is(err, sshx.ErrNoAuth):
+		return "Provide a password or a private key."
+	case errors.Is(err, sshx.ErrHostKeyMismatch), errors.Is(err, sshx.ErrTooMany),
+		errors.Is(err, sshx.ErrUnsupported), errors.Is(err, sshx.ErrDisabled):
+		return err.Error() // already written for a human
+	default:
+		return err.Error()
+	}
+}
+
 // sshFailure maps a dial error onto an HTTP status the UI can branch on.
 func sshFailure(err error) (int, string) {
 	switch {
@@ -374,7 +398,11 @@ func sshFailure(err error) (int, string) {
 	case errors.Is(err, sshx.ErrHostKeyMismatch):
 		return http.StatusConflict, "SSH_HOST_KEY_MISMATCH"
 	case errors.Is(err, sshx.ErrAuth), errors.Is(err, sshx.ErrNoAuth), errors.Is(err, sshx.ErrBadKey):
-		return http.StatusUnauthorized, "SSH_AUTH_FAILED"
+		// Deliberately NOT 401: that status means "your Pulse session is not
+		// valid", and clients (and proxies) act on it by bouncing you to the
+		// login page. This is the *remote host* rejecting the credentials in
+		// the request body, which is an ordinary bad-input response.
+		return http.StatusBadRequest, "SSH_AUTH_FAILED"
 	case errors.Is(err, sshx.ErrTooMany):
 		return http.StatusTooManyRequests, CodeRateLimited
 	default:

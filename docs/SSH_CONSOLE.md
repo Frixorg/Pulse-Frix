@@ -200,6 +200,54 @@ no token ever appears in a URL. The wire protocol is deliberately tiny:
 
 The console holds a WebSocket open for as long as the terminal is on screen.
 Pulse's own nginx config (`apps/dashboard/nginx.conf`) already forwards the
-upgrade and raises `proxy_read_timeout` to 1h. Caddy needs no configuration. If
-you front Pulse with your own proxy, do the same.
+upgrade, raises `proxy_read_timeout` to 1h, and sets a `connect-src` that
+permits the socket. Caddy needs no extra configuration.
+
+If you front Pulse with **your own** proxy (Nginx Proxy Manager, Cloudflare, a
+hand-rolled nginx), two things there can break the terminal.
+
+### 1. Content-Security-Policy
+
+This is the common one. A CSP like
+
+```text
+default-src https: data: blob: 'unsafe-inline' 'unsafe-eval'
+```
+
+looks permissive but blocks the console, because `connect-src` falls back to
+`default-src` and the `https:` scheme does **not** match `wss:`. The browser
+console shows:
+
+```text
+Connecting to 'wss://pulse.example.com/api/v1/servers/…/attach' violates the
+following Content Security Policy directive: "default-src https: …".
+Note that 'connect-src' was not explicitly set, so 'default-src' is used as a
+fallback.
+```
+
+Every CSP header on the response is enforced, so a permissive one from Pulse
+cannot rescue a restrictive one from your proxy. Fix it at your proxy by adding
+an explicit `connect-src`:
+
+```text
+add_header Content-Security-Policy "default-src https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' wss://pulse.example.com" always;
+```
+
+or, if you would rather not manage a CSP there at all, remove the header and let
+Pulse's own (already correct) one apply.
+
+The SSH page detects this specific failure and says so, rather than hanging on
+"Connecting…".
+
+### 2. Upgrade headers and timeouts
+
+The proxy must forward the upgrade and not time the socket out:
+
+```nginx
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $connection_upgrade;   # "upgrade" only when requested
+proxy_read_timeout 1h;
+proxy_send_timeout 1h;
+```
 

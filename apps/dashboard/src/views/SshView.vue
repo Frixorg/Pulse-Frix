@@ -10,6 +10,8 @@ import { api, sshSocketURL, ApiError } from "@/api/client";
 import type { SSHCapabilities, SSHAuthMethod, SSHSetupResult, SSHSetupStep, Resource } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import CheckBox from "@/components/CheckBox.vue";
+import PasswordField from "@/components/PasswordField.vue";
 
 const servers = useServersStore();
 const { selected } = storeToRefs(servers);
@@ -458,12 +460,55 @@ async function connect() {
   }
 }
 
+// A Content-Security-Policy that forgets `connect-src` blocks the console
+// before a single byte leaves the browser — and the only clue is a line in the
+// devtools console. Listening for the violation turns that into a message the
+// operator can act on. See docs/SSH_CONSOLE.md#reverse-proxies.
+const CSP_HELP =
+  "Your browser blocked the terminal connection: the page's Content-Security-Policy " +
+  "does not allow a WebSocket. Add connect-src to the CSP on whatever serves or " +
+  "proxies Pulse — see docs/SSH_CONSOLE.md.";
+
+let cspListener: ((e: SecurityPolicyViolationEvent) => void) | null = null;
+
+function watchForCSPBlock(url: string) {
+  stopWatchingCSP();
+  cspListener = (e: SecurityPolicyViolationEvent) => {
+    const blocked = e.blockedURI || "";
+    if (e.effectiveDirective?.includes("connect-src") || blocked.startsWith("ws")) {
+      if (!blocked || url.startsWith(blocked) || blocked.startsWith("ws")) {
+        error.value = CSP_HELP;
+        errorCode.value = "CSP_BLOCKED";
+        phase.value = "idle";
+      }
+    }
+  };
+  document.addEventListener("securitypolicyviolation", cspListener);
+}
+function stopWatchingCSP() {
+  if (cspListener) document.removeEventListener("securitypolicyviolation", cspListener);
+  cspListener = null;
+}
+
 function openSocket(serverId: string, sid: string) {
-  const ws = new WebSocket(sshSocketURL(serverId, sid));
+  const url = sshSocketURL(serverId, sid);
+  watchForCSPBlock(url);
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    // Some browsers throw here rather than firing a violation event.
+    stopWatchingCSP();
+    phase.value = "idle";
+    error.value = CSP_HELP;
+    errorCode.value = "CSP_BLOCKED";
+    return;
+  }
   ws.binaryType = "arraybuffer";
   socket = ws;
 
   ws.onopen = () => {
+    stopWatchingCSP();
     phase.value = "connected";
     nextTick(() => {
       refit();
@@ -489,12 +534,17 @@ function openSocket(serverId: string, sid: string) {
   };
   ws.onclose = () => {
     socket = null;
+    stopWatchingCSP();
     if (phase.value === "connected") {
       writeNotice("— disconnected —");
       phase.value = "ended";
     } else if (phase.value === "connecting") {
       phase.value = "idle";
-      if (!error.value) error.value = "The console connection was closed before it opened.";
+      if (!error.value) {
+        error.value =
+          "The console connection closed before it opened. If Pulse sits behind a " +
+          "reverse proxy, check that it forwards the WebSocket upgrade — see docs/SSH_CONSOLE.md.";
+      }
     }
   };
 }
@@ -563,6 +613,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopWatchingCSP();
   window.removeEventListener("keydown", onKeydown);
   socket?.close();
   socket = null;
@@ -695,10 +746,7 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
               Private key
             </button>
           </div>
-          <label class="remember">
-            <input v-model="remember" type="checkbox" />
-            Remember host &amp; username on this device
-          </label>
+          <CheckBox v-model="remember">Remember host &amp; username on this device</CheckBox>
         </div>
 
         <p v-if="authMode === 'pulse'" class="pulse-auth">
@@ -707,13 +755,10 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
 
         <label v-if="authMode === 'password'" class="field">
           <span class="lbl">Password</span>
-          <input
+          <PasswordField
             v-model="password"
-            class="input"
-            type="password"
-            autocomplete="off"
             placeholder="Sent once to open the session — never stored"
-            @keyup.enter="connect"
+            @submit="connect"
           />
         </label>
 
@@ -730,7 +775,7 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
           </label>
           <label class="field">
             <span class="lbl">Key passphrase <span class="opt">(if the key is encrypted)</span></span>
-            <input v-model="passphrase" class="input" type="password" autocomplete="off" @keyup.enter="connect" />
+            <PasswordField v-model="passphrase" placeholder="Leave empty if the key has none" @submit="connect" />
           </label>
         </template>
 
@@ -816,10 +861,9 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
               </p>
             </div>
 
-            <label class="remember">
-              <input v-model="saveKeyHere" type="checkbox" />
+            <CheckBox v-model="saveKeyHere">
               Save the key in this browser so future sessions need no password
-            </label>
+            </CheckBox>
 
             <p class="setup-note">
               Pulse needs one working login to do this — it is an SSH client, not an agent command.
@@ -1058,14 +1102,6 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
   background: var(--pulse-accent);
   color: var(--pulse-accent-ink);
   font-weight: 700;
-}
-.remember {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--pulse-text-muted);
-  cursor: pointer;
 }
 .privacy {
   font-size: 12px;

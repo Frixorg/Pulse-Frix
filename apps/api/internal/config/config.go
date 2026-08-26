@@ -34,9 +34,11 @@ type Config struct {
 	EnableAutoTLS        bool
 	EnableRemoteActions  bool
 	EnableAutoUpdate     bool
-	// EnableSSHConsole turns on the browser SSH terminal. It is the only
-	// feature that can change a server, so it is off unless asked for, needs
-	// the ssh.exec permission, and needs an API built with -tags ssh.
+	// EnableSSHConsole turns on the browser SSH terminal. Unlike the flags
+	// above it defaults to ON, because the console cannot do anything without
+	// SSH credentials the operator types in per session, and it is gated on the
+	// ssh.exec permission (owner/admin only). Set PULSE_SSH_CONSOLE=false to
+	// remove the terminal entirely.
 	EnableSSHConsole bool
 
 	// Public base URL (used to build OIDC redirect URIs), e.g. https://pulse.frix.me.
@@ -96,7 +98,7 @@ func Load() *Config {
 		EnableAutoTLS:        boolEnv("ENABLE_AUTO_TLS", false),
 		EnableRemoteActions:  boolEnv("ENABLE_REMOTE_ACTIONS", false),
 		EnableAutoUpdate:     boolEnv("ENABLE_AUTO_UPDATE", false),
-		EnableSSHConsole:     boolEnv("PULSE_SSH_CONSOLE", false),
+		EnableSSHConsole:     boolEnv("PULSE_SSH_CONSOLE", true),
 	}
 
 	// Public URL for OIDC redirects: explicit PULSE_PUBLIC_URL, else derived

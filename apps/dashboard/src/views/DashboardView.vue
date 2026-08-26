@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from "vue";
+import { ref, watch, computed, onMounted, onBeforeUnmount } from "vue";
 import { storeToRefs } from "pinia";
 import { useServersStore } from "@/stores/servers";
 import { api } from "@/api/client";
@@ -9,8 +9,12 @@ import StatCard from "@/components/cards/StatCard.vue";
 import MetricChart from "@/components/charts/MetricChart.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
 import OnboardingConnect from "@/components/OnboardingConnect.vue";
-import RefreshButton from "@/components/RefreshButton.vue";
 import { bytes, uptime, tone, timeAgo } from "@/lib/format";
+
+// The dashboard keeps itself current: there is no refresh button because there
+// is nothing to press. A background poll pulls the newest report the agent has
+// sent and swaps the numbers in place — no spinners, no flicker.
+const POLL_MS = 10_000;
 
 const servers = useServersStore();
 const { selected } = storeToRefs(servers);
@@ -19,18 +23,18 @@ const summary = ref<ServerSummary | null>(null);
 const events = ref<EventItem[]>([]);
 const cpu = ref<MetricSeries[]>([]);
 const mem = ref<MetricSeries[]>([]);
-const loading = ref(false);
+// Only the very first load shows a placeholder; every later poll is silent.
+const firstLoad = ref(true);
 const error = ref("");
 
 const c = computed(() => summary.value?.counts);
 
-// Re-runs the whole page check: summary, counts, recent events and both charts.
-// Also refreshes the server list, so a VPS that has just connected (or gone
-// away) shows up without a page reload.
+let inFlight = false;
+let timer: number | undefined;
+
 async function load() {
-  if (!selected.value || loading.value) return;
-  loading.value = true;
-  error.value = "";
+  if (!selected.value || inFlight) return;
+  inFlight = true;
   const id = selected.value.id;
   try {
     const [s, ev, cpuM, memM] = await Promise.all([
@@ -43,20 +47,45 @@ async function load() {
     events.value = ev.data;
     cpu.value = cpuM.series;
     mem.value = memM.series;
+    error.value = "";
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "failed to refresh";
+    // A failed poll keeps the last good numbers on screen rather than blanking
+    // the page; the message says the view may be behind.
+    error.value = e instanceof Error ? e.message : "could not reach the API";
   } finally {
-    loading.value = false;
+    firstLoad.value = false;
+    inFlight = false;
   }
 }
 
-async function refresh() {
+// A VPS that just enrolled (or went away) should appear without a reload.
+async function tick() {
   await servers.load().catch(() => undefined);
   await load();
 }
 
-onMounted(load);
-watch(selected, load);
+// Polling a hidden tab is pure waste; catch up the moment it comes back.
+function onVisibility() {
+  if (document.visibilityState === "visible") tick();
+}
+
+onMounted(() => {
+  load();
+  timer = window.setInterval(() => {
+    if (document.visibilityState === "visible") tick();
+  }, POLL_MS);
+  document.addEventListener("visibilitychange", onVisibility);
+});
+
+onBeforeUnmount(() => {
+  if (timer) window.clearInterval(timer);
+  document.removeEventListener("visibilitychange", onVisibility);
+});
+
+watch(selected, () => {
+  firstLoad.value = true;
+  load();
+});
 </script>
 
 <template>
@@ -66,18 +95,7 @@ watch(selected, load);
     <template v-else>
       <PageHeader title="Dashboard" subtitle="Is my infrastructure healthy?">
         <template #actions>
-          <div class="head-actions">
-            <RefreshButton
-              variant="solid"
-              label="Re-check"
-              busy-label="Re-checking…"
-              title="Re-run the check: pull the newest report the agent has sent for this server"
-              :loading="loading"
-              :show-age="false"
-              @refresh="refresh"
-            />
-            <span v-if="error" class="head-err">{{ error }}</span>
-          </div>
+          <span v-if="error" class="head-err">{{ error }} — showing the last values received.</span>
         </template>
       </PageHeader>
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-3">
@@ -128,8 +146,8 @@ watch(selected, load);
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
-        <MetricChart title="CPU (1h)" :series="cpu" :loading="loading" loading-label="1h" />
-        <MetricChart title="Memory (1h)" :series="mem" :loading="loading" loading-label="1h" />
+        <MetricChart title="CPU (1h)" :series="cpu" :loading="firstLoad" loading-label="1h" />
+        <MetricChart title="Memory (1h)" :series="mem" :loading="firstLoad" loading-label="1h" />
       </div>
 
       <div class="card">
@@ -153,12 +171,6 @@ watch(selected, load);
 </template>
 
 <style scoped>
-.head-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
 .head-err {
   font-size: 11.5px;
   font-family: var(--pulse-font-mono);

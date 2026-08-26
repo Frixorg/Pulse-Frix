@@ -3,9 +3,12 @@
 The **SSH** tab gives you a real terminal on your server inside the dashboard —
 like PuTTY, without leaving Pulse.
 
-It is the one part of Pulse that can change a server, so it is built as a
-separate, opt-in path that is **off by default** and does not weaken the
-read-only guarantees documented in [SAFETY_MODEL.md](./SAFETY_MODEL.md).
+It works out of the box — no build flags, no environment variables. It is the
+one part of Pulse that can change a server, so it is built as a separate path
+that does not weaken the read-only guarantees documented in
+[SAFETY_MODEL.md](./SAFETY_MODEL.md): it is gated on the `ssh.exec` permission,
+it cannot do anything without SSH credentials you type in, and the agent is
+never involved.
 
 ---
 
@@ -27,34 +30,29 @@ read-only guarantees documented in [SAFETY_MODEL.md](./SAFETY_MODEL.md).
 
 ---
 
-## Enabling it
+## Turning it off
 
-Two independent switches, both required.
+Nothing is needed to turn it **on**. The SSH client (`golang.org/x/crypto`, the
+control plane's only direct dependency) is in the default build, and
+`PULSE_SSH_CONSOLE` defaults to `true`.
 
-### 1. Build an API that contains an SSH client
-
-The default API build is **standard-library only** — it has no SSH client
-compiled in at all, so there is nothing to enable. Build with the `ssh` tag to
-include one (this is the only dependency it adds: `golang.org/x/crypto`).
+To remove the terminal from a deployment:
 
 ```bash
-# Docker
-docker compose build --build-arg TAGS=ssh pulse-api
-
-# From source
-cd apps/api && go get golang.org/x/crypto && go build -tags ssh ./cmd/pulse-api
+PULSE_SSH_CONSOLE=false     # hides the console; the tab explains why
 ```
 
-Tags combine with the PostgreSQL adapter: `--build-arg TAGS="pgx ssh"`.
-
-### 2. Turn the console on
+To remove the SSH client from the binary entirely — a pure standard-library
+control plane:
 
 ```bash
-PULSE_SSH_CONSOLE=true
+docker compose build --build-arg TAGS=nosshconsole pulse-api
+# or: go build -tags nosshconsole ./cmd/pulse-api
 ```
 
-Restart the API. Until both are true, the SSH tab explains which step is
-missing instead of offering a terminal that cannot connect.
+Tags combine with the PostgreSQL adapter: `--build-arg TAGS="pgx nosshconsole"`.
+Either way the SSH tab says exactly what was switched off, instead of offering a
+terminal that cannot connect. Live sessions close when the API shuts down.
 
 ---
 
@@ -205,9 +203,3 @@ Pulse's own nginx config (`apps/dashboard/nginx.conf`) already forwards the
 upgrade and raises `proxy_read_timeout` to 1h. Caddy needs no configuration. If
 you front Pulse with your own proxy, do the same.
 
----
-
-## Turning it off
-
-Set `PULSE_SSH_CONSOLE=false` (or rebuild without `-tags ssh`) and restart. Live
-sessions are closed when the API shuts down.

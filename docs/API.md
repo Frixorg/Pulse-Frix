@@ -124,8 +124,10 @@ unexpected listeners). **Reports only — never changes** security configuration
 ### SSH console — `/api/v1/servers/{id}/ssh`
 
 The only write path in the API, and the only one an agent is not involved in.
-Off unless `PULSE_SSH_CONSOLE=true` **and** the binary was built with
-`-tags ssh`; requires the `ssh.exec` permission (owner/admin — never viewer).
+On by default and requires no configuration; it can do nothing without SSH
+credentials supplied per request. Requires the `ssh.exec` permission
+(owner/admin — never viewer). `PULSE_SSH_CONSOLE=false` removes it, and
+`-tags nosshconsole` leaves the SSH client out of the binary.
 
 - `GET /ssh/capabilities` — `{enabled, reason, default_port, can_use}`. The
   dashboard uses `reason` to explain what an operator has to change.

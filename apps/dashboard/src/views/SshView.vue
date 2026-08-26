@@ -637,22 +637,11 @@ const isViewer = computed(() => caps.value?.enabled === true && caps.value?.can_
           </template>
           <template v-else>{{ caps?.reason }}</template>
         </p>
-        <div v-if="!isViewer" class="gate-steps">
-          <div class="gate-step">
-            <span class="gate-n">1</span>
-            <div>
-              <div class="gate-st">Build the API with an SSH client</div>
-              <code class="gate-code">docker compose build --build-arg TAGS=ssh pulse-api</code>
-            </div>
-          </div>
-          <div class="gate-step">
-            <span class="gate-n">2</span>
-            <div>
-              <div class="gate-st">Turn the console on</div>
-              <code class="gate-code">PULSE_SSH_CONSOLE=true</code>
-            </div>
-          </div>
-        </div>
+        <p v-if="!isViewer" class="gate-text">
+          The console ships enabled by default, so this deployment has switched it off on purpose.
+          Remove <code class="gate-code">PULSE_SSH_CONSOLE=false</code> from the API's environment
+          (or drop the <code class="gate-code">nosshconsole</code> build tag) and restart it.
+        </p>
         <button class="btn-line" @click="loadCaps">Check again</button>
       </div>
     </div>

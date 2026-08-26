@@ -68,8 +68,8 @@ services:
       args:
         # Default: in-memory store (zero external deps, always builds).
         # For durable Postgres storage set API_TAGS=pgx in your .env and rebuild
-        # (see the persistence note in docs/DEPLOYMENT.md). Add "ssh" for the
-        # browser console: API_TAGS="pgx ssh" (docs/SSH_CONSOLE.md).
+        # (see the persistence note in docs/DEPLOYMENT.md). The SSH console
+        # needs no tag — it is in the default build (docs/SSH_CONSOLE.md).
         TAGS: ${API_TAGS:-}
     container_name: pulse-api
     restart: unless-stopped
@@ -83,9 +83,9 @@ services:
       PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:-}
       PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
       PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
-      # Browser SSH console — off by default, and inert unless the image was
-      # built with API_TAGS=ssh. See docs/SSH_CONSOLE.md.
-      PULSE_SSH_CONSOLE: ${PULSE_SSH_CONSOLE:-false}
+      # Browser SSH console (docs/SSH_CONSOLE.md). On by default; set
+      # PULSE_SSH_CONSOLE=false in your .env to remove the terminal.
+      PULSE_SSH_CONSOLE: ${PULSE_SSH_CONSOLE:-true}
       # OIDC — used to build redirect URIs and configure providers.
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
       PULSE_PUBLIC_URL: ${PULSE_PUBLIC_URL:-}

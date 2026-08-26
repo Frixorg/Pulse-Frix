@@ -1,4 +1,4 @@
-//go:build ssh
+//go:build !nosshconsole
 
 package sshx
 

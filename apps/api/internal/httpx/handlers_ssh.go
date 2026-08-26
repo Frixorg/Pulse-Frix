@@ -51,10 +51,11 @@ func (s *Server) handleSSHCapabilities(w http.ResponseWriter, r *http.Request) {
 	if err := s.ssh.Unavailable(); err != nil {
 		switch {
 		case errors.Is(err, sshx.ErrUnsupported):
-			reason = "This API build has no SSH client compiled in. Rebuild it with -tags ssh " +
-				"(Docker: --build-arg TAGS=ssh) — see docs/SSH_CONSOLE.md."
+			reason = "This API was built with -tags nosshconsole, so it contains no SSH client. " +
+				"Rebuild it without that tag — see docs/SSH_CONSOLE.md."
 		default:
-			reason = "The SSH console is turned off. Set PULSE_SSH_CONSOLE=true on the API and restart it."
+			reason = "The SSH console was turned off with PULSE_SSH_CONSOLE=false. " +
+				"Remove that setting (or set it to true) on the API and restart it."
 		}
 	}
 	JSON(w, http.StatusOK, map[string]any{

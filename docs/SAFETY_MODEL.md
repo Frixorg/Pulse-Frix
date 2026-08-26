@@ -192,9 +192,11 @@ The dashboard's **SSH** tab opens a real terminal on a server. It is the only
 feature in Pulse that can change one, so it is fenced off rather than folded
 into the observability path:
 
-- It is **off by default**, twice over: the standard API build contains no SSH
-  client at all (it is compiled in only with `-tags ssh`), and even that build
-  stays inert unless `PULSE_SSH_CONSOLE=true`.
+- It is **inert without credentials**. Pulse has no standing access to any
+  host: every session is opened with an SSH password or key the operator types
+  in at that moment, and nothing is stored afterwards. A deployment that wants
+  the terminal gone sets `PULSE_SSH_CONSOLE=false`, or builds with
+  `-tags nosshconsole` to leave the SSH client out of the binary altogether.
 - It requires the `ssh.exec` permission — owners and admins only. No
   configuration gives a viewer a shell.
 - **The agent is not involved.** The API dials the host over SSH like any other

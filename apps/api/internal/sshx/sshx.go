@@ -8,12 +8,12 @@
 //   - The agent is NOT involved. Agents remain read-only and still never accept
 //     a command from the control plane (see docs/SAFETY_MODEL.md). The console
 //     is an ordinary SSH client that happens to run inside the API.
-//   - It is off unless the operator sets PULSE_SSH_CONSOLE=true.
 //   - It requires the ssh.exec permission (owner/admin only — never viewer).
 //   - Credentials are supplied per session, held only for the duration of the
-//     dial, and never written to the store, the logs or an audit record.
-//   - The default build does not even contain an SSH client; Dial is compiled
-//     in only with `-tags ssh`.
+//     dial, and never written to the store, the logs or an audit record. Pulse
+//     therefore has no standing access to any host.
+//   - A deployment can remove it with PULSE_SSH_CONSOLE=false, or leave the SSH
+//     client out of the binary entirely with `-tags nosshconsole`.
 package sshx
 
 import (

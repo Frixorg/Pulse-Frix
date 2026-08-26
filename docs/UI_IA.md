@@ -72,6 +72,22 @@ Read-only findings (SSH exposed, HTTP-without-HTTPS, expired/weak TLS, public
 DB/Redis port, Docker exposure, unexpected listeners) with recommendations —
 **never auto-changes** anything.
 
+Findings are grouped into category sections. The severity pills are a
+**multi-select** filter — pick critical *and* high — and while a filter is on,
+only the sections holding a matching finding are shown; the rest are hidden
+rather than left as empty headers.
+
+**Export** writes exactly what is on screen, grouped the same way:
+
+| Format | For |
+|--------|-----|
+| Markdown | a readable write-up to hand to someone |
+| CSV | one row per finding, for a spreadsheet |
+| JSON | full detail, for tooling |
+
+Each export records the server, scan time, grade, the severity breakdown, and
+which filter was active — so a filtered report never looks like a full audit.
+
 ---
 
 ## First-run experience

@@ -57,6 +57,7 @@ async function load() {
   runningCat.value = null;
   findings.value = [];
   checkMap.value = {};
+  clearFilters();
   if (!selected.value) return;
   loading.value = true;
   try {
@@ -78,7 +79,10 @@ async function load() {
 }
 onMounted(load);
 watch(selected, load);
-onUnmounted(stopPolling);
+onUnmounted(() => {
+  stopPolling();
+  document.removeEventListener("click", closeExport);
+});
 
 async function runScan(mode: "full" | "active" | "passive", categories?: string[]) {
   if (!selected.value || scanning.value) return;
@@ -141,26 +145,48 @@ const grade = computed(() => {
 });
 
 // --- filters ---
-const sevFilter = ref<FindingSeverity | null>(null);
+// Severities are a multi-select: an auditor usually wants "critical and high",
+// not one band at a time. An empty selection means no filter at all.
+const sevFilter = ref<Set<FindingSeverity>>(new Set());
 const catFilter = ref<string | null>(null);
 
+const filtering = computed(() => sevFilter.value.size > 0 || catFilter.value !== null);
+const selectedSeverities = computed(() => SEVERITIES.filter((s) => sevFilter.value.has(s)));
+
 function toggleSev(s: FindingSeverity) {
-  sevFilter.value = sevFilter.value === s ? null : s;
+  const next = new Set(sevFilter.value);
+  if (next.has(s)) next.delete(s);
+  else next.add(s);
+  sevFilter.value = next;
+}
+function clearFilters() {
+  sevFilter.value = new Set();
+  catFilter.value = null;
+}
+function matchesSeverity(f: SecurityFinding): boolean {
+  return sevFilter.value.size === 0 || sevFilter.value.has(f.severity);
 }
 function catName(id: string): string {
   return categories.value.find((c) => c.id === id)?.name ?? id;
 }
 
+// While a filter is on, a section with nothing matching is noise — hide it
+// rather than show a category header over an empty list.
 const visibleCategories = computed(() =>
   categories.value.filter((cat) => {
     if (catFilter.value && cat.id !== catFilter.value) return false;
+    if (sevFilter.value.size > 0) return shownFindings(cat.id).length > 0;
     return true;
   }),
 );
 
 function shownFindings(catId: string): SecurityFinding[] {
-  return findingsOf(catId).filter((f) => !sevFilter.value || f.severity === sevFilter.value);
+  return findingsOf(catId).filter(matchesSeverity);
 }
+
+const shownCount = computed(() =>
+  visibleCategories.value.reduce((n, cat) => n + shownFindings(cat.id).length, 0),
+);
 
 function catWorst(catId: string): FindingSeverity | null {
   const fs = findingsOf(catId);
@@ -174,6 +200,148 @@ function catSummary(catId: string) {
   const skipped = checks.filter((c) => c.status === "skipped").length;
   return { total: checks.length, issues, passed, skipped, findings: findingsOf(catId).length };
 }
+
+// --- export ---
+// Exports whatever is on screen: with no filter that is the whole audit, with
+// one it is exactly the subset being looked at. Grouping mirrors the page, so a
+// report handed to someone else reads the same way.
+const exportOpen = ref(false);
+
+interface ExportGroup {
+  id: string;
+  name: string;
+  description: string;
+  findings: SecurityFinding[];
+}
+
+const exportGroups = computed<ExportGroup[]>(() =>
+  visibleCategories.value
+    .map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      description: cat.description,
+      findings: shownFindings(cat.id),
+    }))
+    .filter((g) => g.findings.length > 0),
+);
+
+function exportBaseName(ext: string) {
+  const host = (selected.value?.hostname || selected.value?.server_id || "server").replace(/[^a-zA-Z0-9._-]/g, "-");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  return `pulse-security-${host}-${stamp}.${ext}`;
+}
+
+function download(filename: string, mime: string, body: string) {
+  const blob = new Blob([body], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  exportOpen.value = false;
+}
+
+function exportMeta() {
+  return {
+    server: selected.value?.hostname || selected.value?.server_id || "",
+    exported_at: new Date().toISOString(),
+    scan_finished_at: scan.value?.finished_at || scan.value?.started_at || null,
+    scan_mode: scan.value?.mode ?? null,
+    grade: grade.value.letter,
+    filter: {
+      severities: selectedSeverities.value,
+      category: catFilter.value,
+    },
+    totals: {
+      exported: shownCount.value,
+      all_findings: totalFindings.value,
+      by_severity: counts.value,
+    },
+  };
+}
+
+function exportJSON() {
+  download(
+    exportBaseName("json"),
+    "application/json",
+    JSON.stringify({ ...exportMeta(), categories: exportGroups.value }, null, 2),
+  );
+}
+
+function csvCell(v: unknown): string {
+  const text = v === undefined || v === null ? "" : String(v);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportCSV() {
+  const header = [
+    "category", "severity", "cvss", "title", "resource",
+    "owasp", "cwe", "detail", "evidence", "recommendation", "references",
+  ];
+  const rows = [header.map(csvCell).join(",")];
+  for (const g of exportGroups.value) {
+    for (const f of g.findings) {
+      rows.push([
+        g.name, f.severity, f.cvss ?? "", f.title, f.resource ?? "",
+        f.owasp ?? "", f.cwe ?? "", f.detail, f.evidence ?? "",
+        f.recommendation, (f.references ?? []).join(" "),
+      ].map(csvCell).join(","));
+    }
+  }
+  // A BOM so Excel opens UTF-8 correctly instead of mangling the em dashes.
+  download(exportBaseName("csv"), "text/csv", "\uFEFF" + rows.join("\r\n"));
+}
+
+function exportMarkdown() {
+  const m = exportMeta();
+  const out: string[] = [];
+  out.push(`# Security report — ${m.server}`, "");
+  out.push(`- Exported: ${new Date(m.exported_at).toLocaleString()}`);
+  if (m.scan_finished_at) out.push(`- Last scan: ${new Date(m.scan_finished_at).toLocaleString()}`);
+  out.push(`- Grade: **${m.grade}** (${grade.value.label})`);
+  out.push(
+    `- Findings: **${m.totals.exported}**` +
+      (m.totals.exported === m.totals.all_findings ? "" : ` of ${m.totals.all_findings} (filtered)`),
+  );
+  if (selectedSeverities.value.length) out.push(`- Severity filter: ${selectedSeverities.value.join(", ")}`);
+  out.push("", "| Severity | Count |", "| --- | --- |");
+  for (const sev of SEVERITIES) out.push(`| ${sev} | ${counts.value[sev]} |`);
+  out.push("");
+
+  if (!exportGroups.value.length) {
+    out.push("No findings matched.", "");
+  }
+  for (const g of exportGroups.value) {
+    out.push(`## ${g.name} (${g.findings.length})`, "");
+    if (g.description) out.push(`_${g.description}_`, "");
+    for (const f of g.findings) {
+      out.push(`### ${f.severity} — ${f.title}`, "");
+      const facts: string[] = [];
+      if (f.resource) facts.push(`**Resource:** ${f.resource}`);
+      if (f.cvss) facts.push(`**CVSS:** ${f.cvss.toFixed(1)}`);
+      if (f.owasp) facts.push(`**OWASP:** ${f.owasp}`);
+      if (f.cwe) facts.push(`**CWE:** ${f.cwe}`);
+      if (facts.length) out.push(facts.join(" · "), "");
+      out.push(f.detail, "");
+      if (f.evidence) out.push("```", f.evidence, "```", "");
+      out.push(`**Remediation.** ${f.recommendation}`, "");
+      if (f.references?.length) {
+        out.push(...f.references.map((r) => `- ${r}`), "");
+      }
+    }
+  }
+  out.push("---", "", "Generated by PulseFrix. Findings are read-only observations; nothing was changed.", "");
+  download(exportBaseName("md"), "text/markdown", out.join("\n"));
+}
+
+function closeExport(e: MouseEvent) {
+  if (!(e.target as HTMLElement).closest(".export")) exportOpen.value = false;
+}
+watch(exportOpen, (open) => {
+  if (open) document.addEventListener("click", closeExport);
+  else document.removeEventListener("click", closeExport);
+});
 
 // --- expand/collapse findings ---
 const expanded = ref<Set<string>>(new Set());
@@ -234,6 +402,38 @@ function refHost(url: string): string {
           <button class="run ghost" :disabled="scanning || !selected" @click="runScan('passive')" title="Re-run only the passive (no-network) checks">
             Passive re-check
           </button>
+
+          <!-- Exports exactly what is on screen, filter and all. -->
+          <div class="export">
+            <button
+              class="run ghost"
+              :disabled="!shownCount"
+              :title="shownCount ? `Export ${shownCount} finding(s), grouped by category` : 'Nothing to export yet'"
+              @click.stop="exportOpen = !exportOpen"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              Export<template v-if="shownCount"> ({{ shownCount }})</template>
+            </button>
+            <div v-if="exportOpen" class="export-menu">
+              <button class="export-item" @click="exportMarkdown">
+                <span class="ei-name">Markdown report</span>
+                <span class="ei-hint">readable write-up, grouped by category</span>
+              </button>
+              <button class="export-item" @click="exportCSV">
+                <span class="ei-name">CSV</span>
+                <span class="ei-hint">one row per finding, for a spreadsheet</span>
+              </button>
+              <button class="export-item" @click="exportJSON">
+                <span class="ei-name">JSON</span>
+                <span class="ei-hint">full detail, for tooling</span>
+              </button>
+              <p class="export-note">
+                {{ filtering ? `Exports the ${shownCount} finding(s) matching the current filter.` : "Exports all findings." }}
+              </p>
+            </div>
+          </div>
         </div>
       </template>
     </PageHeader>
@@ -285,7 +485,9 @@ function refHost(url: string): string {
             v-for="s in SEVERITIES"
             :key="s"
             class="sev-pill"
-            :class="[sevCls(s), { active: sevFilter === s, muted: counts[s] === 0 }]"
+            :class="[sevCls(s), { active: sevFilter.has(s), muted: counts[s] === 0 }]"
+            :aria-pressed="sevFilter.has(s)"
+            :title="sevFilter.has(s) ? `Stop filtering by ${s.toLowerCase()}` : `Add ${s.toLowerCase()} to the filter`"
             @click="toggleSev(s)"
           >
             <span class="sp-n">{{ counts[s] }}</span>
@@ -295,11 +497,23 @@ function refHost(url: string): string {
         </div>
       </div>
 
-      <div v-if="catFilter || sevFilter" class="filter-note">
-        Filtering
-        <b v-if="catFilter">{{ catName(catFilter) }}</b>
-        <b v-if="sevFilter">{{ sevFilter }}</b>
-        · <button class="clear" @click="catFilter = null; sevFilter = null">clear</button>
+      <div v-if="filtering" class="filter-note">
+        Showing
+        <b>{{ shownCount }}</b> of {{ totalFindings }} findings
+        <template v-if="selectedSeverities.length">
+          ·
+          <template v-for="(sv, i) in selectedSeverities" :key="sv"
+            ><b class="fn-sev" :class="sevCls(sv)">{{ sv.toLowerCase() }}</b
+            ><span v-if="i < selectedSeverities.length - 1" class="fn-sep">,&nbsp;</span
+          ></template>
+        </template>
+        <template v-if="catFilter"> · <b>{{ catName(catFilter) }}</b></template>
+        · <button class="clear" @click="clearFilters">clear</button>
+      </div>
+
+      <div v-if="filtering && !shownCount" class="no-match">
+        Nothing matches this filter.
+        <button class="clear" @click="clearFilters">Show everything</button>
       </div>
 
       <!-- Category sections -->
@@ -368,9 +582,6 @@ function refHost(url: string): string {
                 </div>
               </div>
             </div>
-          </div>
-          <div v-else-if="catSummary(cat.id).findings && sevFilter" class="cat-empty">
-            No {{ sevFilter?.toLowerCase() }} findings in this category.
           </div>
           <div v-else-if="!catSummary(cat.id).findings" class="cat-empty ok">
             <span class="ce-badge">✓</span> All {{ catSummary(cat.id).total }} checks passed — nothing to flag.
@@ -564,6 +775,73 @@ function refHost(url: string): string {
 .g-c .grade-letter { color: var(--pulse-degraded); }
 .g-d .grade-letter { color: #fb923c; }
 .g-f .grade-letter { color: var(--pulse-down); }
+/* Export menu */
+.export {
+  position: relative;
+}
+.export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 268px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--pulse-solid);
+  border: 1px solid var(--pulse-border);
+  box-shadow: var(--pulse-shadow);
+}
+.export-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.export-item:hover {
+  background: var(--pulse-surface-2);
+}
+.ei-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pulse-text);
+}
+.ei-hint {
+  font-size: 11px;
+  color: var(--pulse-text-muted);
+}
+.export-note {
+  margin: 4px 6px 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--pulse-border);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--pulse-text-muted);
+}
+.no-match {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px;
+  border-radius: 14px;
+  border: 1px dashed var(--pulse-border);
+  color: var(--pulse-text-muted);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.fn-sep {
+  color: var(--pulse-text-muted);
+}
+.fn-sev {
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
 .sev-pills {
   display: flex;
   align-items: center;

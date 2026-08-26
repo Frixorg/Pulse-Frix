@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, watch, onMounted } from "vue";
 import { api } from "@/api/client";
 import type { ServerSummary, Topology, MetricSeries } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
@@ -7,9 +7,12 @@ import StatCard from "@/components/cards/StatCard.vue";
 import MetricChart from "@/components/charts/MetricChart.vue";
 import TopologyGraph from "@/components/topology/TopologyGraph.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import { bytes, uptime, tone } from "@/lib/format";
 
 const props = defineProps<{ id: string }>();
+
+const RANGES = ["1h", "6h", "24h", "7d", "30d"];
 
 const summary = ref<ServerSummary | null>(null);
 const topology = ref<Topology | null>(null);
@@ -17,36 +20,83 @@ const cpu = ref<MetricSeries[]>([]);
 const net = ref<MetricSeries[]>([]);
 const range = ref("6h");
 
+const chartsLoading = ref(false);
+const pageLoading = ref(false);
+const pendingRange = ref<string | null>(null);
+const lastUpdated = ref<number | null>(null);
+let chartSeq = 0;
+
 async function loadCharts() {
-  const [cpuM, netM] = await Promise.all([
-    api.metrics(props.id, "cpu", range.value).catch(() => ({ series: [] })),
-    api.metrics(props.id, "network", range.value).catch(() => ({ series: [] })),
-  ]);
-  cpu.value = cpuM.series;
-  net.value = netM.series;
+  const wanted = range.value;
+  const seq = ++chartSeq;
+  chartsLoading.value = true;
+  pendingRange.value = wanted;
+  try {
+    const [cpuM, netM] = await Promise.all([
+      api.metrics(props.id, "cpu", wanted).catch(() => ({ series: [] })),
+      api.metrics(props.id, "network", wanted).catch(() => ({ series: [] })),
+    ]);
+    if (seq !== chartSeq) return; // a newer range won
+    cpu.value = cpuM.series;
+    net.value = netM.series;
+  } finally {
+    if (seq === chartSeq) {
+      chartsLoading.value = false;
+      pendingRange.value = null;
+    }
+  }
 }
 
-onMounted(async () => {
-  const [s, t] = await Promise.all([
-    api.summary(props.id),
-    api.topology(props.id).catch(() => ({ nodes: [], edges: [] })),
-  ]);
-  summary.value = s;
-  topology.value = t;
-  await loadCharts();
-});
+// Full re-check of this server: summary, topology and both charts.
+async function refresh() {
+  if (pageLoading.value) return;
+  pageLoading.value = true;
+  try {
+    const [s, t] = await Promise.all([
+      api.summary(props.id),
+      api.topology(props.id).catch(() => ({ nodes: [], edges: [] })),
+    ]);
+    summary.value = s;
+    topology.value = t;
+    await loadCharts();
+    lastUpdated.value = Date.now();
+  } finally {
+    pageLoading.value = false;
+  }
+}
+
+onMounted(refresh);
+watch(range, loadCharts);
 </script>
 
 <template>
   <div>
     <PageHeader :title="summary?.server.hostname || 'Server'" subtitle="Server detail">
       <template #actions>
-        <div class="flex items-center gap-2">
+        <div class="head-actions">
           <HealthBadge :status="summary?.health" />
-          <select v-model="range" class="bg-surface-2 border border-border rounded-md text-xs px-2 py-1"
-            @change="loadCharts">
-            <option>1h</option><option>6h</option><option>24h</option><option>7d</option><option>30d</option>
-          </select>
+          <div class="ranges" :class="{ busy: chartsLoading }" role="group" aria-label="Chart time range">
+            <button
+              v-for="r in RANGES"
+              :key="r"
+              class="range"
+              :class="{ on: range === r, pending: pendingRange === r }"
+              :disabled="chartsLoading && pendingRange !== r"
+              :aria-pressed="range === r"
+              @click="range = r"
+            >
+              <span v-if="pendingRange === r" class="range-spin" aria-hidden="true"></span>
+              {{ r }}
+            </button>
+          </div>
+          <RefreshButton
+            label="Re-check"
+            busy-label="Re-checking…"
+            title="Re-run the check for this server: summary, topology and charts"
+            :loading="pageLoading"
+            :updated-at="lastUpdated"
+            @refresh="refresh"
+          />
         </div>
       </template>
     </PageHeader>
@@ -63,10 +113,86 @@ onMounted(async () => {
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
-      <MetricChart :title="`CPU (${range})`" :series="cpu" />
-      <MetricChart :title="`Network RX (${range})`" :series="net" />
+      <MetricChart
+        :title="`CPU (${range})`"
+        :series="cpu"
+        unit="%"
+        :loading="chartsLoading"
+        :loading-label="pendingRange ?? undefined"
+      />
+      <MetricChart
+        :title="`Network RX (${range})`"
+        :series="net"
+        unit="B/s"
+        :loading="chartsLoading"
+        :loading-label="pendingRange ?? undefined"
+      />
     </div>
 
     <TopologyGraph :topology="topology" />
   </div>
 </template>
+
+<style scoped>
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ranges {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--pulse-surface);
+  border: 1px solid var(--pulse-border);
+}
+.ranges.busy {
+  border-color: rgba(199, 245, 66, 0.4);
+}
+.range {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--pulse-text-muted);
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: var(--pulse-font-mono);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.range:hover:not(:disabled) {
+  color: var(--pulse-text);
+}
+.range:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.range.on {
+  background: var(--pulse-accent);
+  color: var(--pulse-accent-ink);
+  font-weight: 700;
+}
+.range-spin {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: sd-spin 0.7s linear infinite;
+}
+@keyframes sd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .range-spin {
+    animation-duration: 2.4s;
+  }
+}
+</style>

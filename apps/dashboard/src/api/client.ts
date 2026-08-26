@@ -18,17 +18,24 @@ import type {
   Topology,
   DetectorResult,
   Page,
+  SSHCapabilities,
+  SSHOpenRequest,
+  SSHSession,
 } from "./types";
 
 export class ApiError extends Error {
   code: string;
   requestId: string;
   status: number;
-  constructor(status: number, code: string, message: string, requestId = "") {
+  /** The raw error object, for endpoints that attach context (e.g. the SSH
+   *  host-key fingerprint the API actually saw on a mismatch). */
+  details: Record<string, unknown>;
+  constructor(status: number, code: string, message: string, requestId = "", details: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
     this.code = code;
     this.requestId = requestId;
+    this.details = details;
   }
 }
 
@@ -45,9 +52,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = text ? JSON.parse(text) : {};
   if (!resp.ok) {
     const e = body?.error ?? {};
-    throw new ApiError(resp.status, e.code ?? "INTERNAL_ERROR", e.message ?? resp.statusText, e.request_id);
+    throw new ApiError(resp.status, e.code ?? "INTERNAL_ERROR", e.message ?? resp.statusText, e.request_id, e);
   }
   return body as T;
+}
+
+// sshSocketURL builds the WebSocket URL for a live console. The session cookie
+// authenticates the upgrade, so no token ever appears in the URL.
+export function sshSocketURL(serverId: string, sessionId: string): string {
+  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${scheme}//${window.location.host}/api/v1/servers/${encodeURIComponent(serverId)}/ssh/sessions/${encodeURIComponent(sessionId)}/attach`;
 }
 
 export const api = {
@@ -95,6 +109,13 @@ export const api = {
   deleteAlert: (id: string) => request<{ status: string }>(`/alerts/${id}`, { method: "DELETE" }),
   alertInstances: () => request<Page<AlertInstance>>("/alerts/instances"),
   events: (limit = 50) => request<Page<EventItem>>(`/events?limit=${limit}`),
+
+  // ssh console
+  sshCapabilities: () => request<SSHCapabilities>("/ssh/capabilities"),
+  openSSHSession: (id: string, body: SSHOpenRequest) =>
+    request<SSHSession>(`/servers/${id}/ssh/sessions`, { method: "POST", body: JSON.stringify(body) }),
+  closeSSHSession: (id: string, sid: string) =>
+    request<{ status: string }>(`/servers/${id}/ssh/sessions/${sid}`, { method: "DELETE" }),
 
   // enrollment (cloud)
   createEnrollmentToken: () =>

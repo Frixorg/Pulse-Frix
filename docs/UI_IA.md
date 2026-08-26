@@ -15,9 +15,9 @@ Reference implementation: [`apps/dashboard`](../apps/dashboard).
 ## Navigation
 
 ```text
-Dashboard · Servers · Services · Containers · Applications · Domains ·
-Network · Storage · Databases · Logs · Alerts · Metrics · Infrastructure ·
-Integrations · Settings
+Dashboard · Servers · Services · Containers · Runtimes · Domains ·
+Network · Storage · Databases · Logs · SSH · Alerts · Metrics ·
+Infrastructure · Security · Integrations · Settings
 ```
 
 ---

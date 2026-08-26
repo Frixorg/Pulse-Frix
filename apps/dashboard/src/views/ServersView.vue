@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { useServersStore } from "@/stores/servers";
@@ -8,11 +8,21 @@ import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
 import OnboardingConnect from "@/components/OnboardingConnect.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import { timeAgo } from "@/lib/format";
 
 const servers = useServersStore();
 const { list, loading } = storeToRefs(servers);
 const router = useRouter();
+const lastUpdated = ref<number | null>(null);
+
+// Re-runs the server check: re-reads the fleet and each server's live status,
+// so a VPS that just enrolled (or just went quiet) is reflected immediately.
+async function refresh() {
+  await servers.load();
+  lastUpdated.value = Date.now();
+}
+onMounted(refresh);
 
 const target = ref<Server | null>(null);
 const removing = ref(false);
@@ -60,12 +70,22 @@ async function removeFromDashboard() {
       subtitle="Every VPS connected to Pulse. Removing one first cleans it off the VPS, then clears it from your dashboard."
     >
       <template #actions>
-        <button class="add-btn" @click="showAdd = true">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Add server
-        </button>
+        <div class="head-actions">
+          <RefreshButton
+            label="Re-check servers"
+            busy-label="Checking…"
+            title="Re-run the check: re-read every connected VPS and its current status"
+            :loading="loading"
+            :updated-at="lastUpdated"
+            @refresh="refresh"
+          />
+          <button class="add-btn" @click="showAdd = true">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Add server
+          </button>
+        </div>
       </template>
     </PageHeader>
     <EmptyState
@@ -164,6 +184,12 @@ async function removeFromDashboard() {
 </template>
 
 <style scoped>
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .row {
   cursor: pointer;
   transition: background 0.12s;

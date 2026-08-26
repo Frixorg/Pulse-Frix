@@ -14,6 +14,7 @@ import (
 	"github.com/frix-me/pulse/api/internal/oidc"
 	"github.com/frix-me/pulse/api/internal/rbac"
 	"github.com/frix-me/pulse/api/internal/scanner"
+	"github.com/frix-me/pulse/api/internal/sshx"
 	"github.com/frix-me/pulse/api/internal/store"
 )
 
@@ -26,10 +27,12 @@ type Server struct {
 	metrics *metricsproxy.Client
 	oidc    *oidc.Manager
 	sec     *scanner.Manager
+	ssh     *sshx.Manager
 
 	loginLimiter  *Limiter
 	enrollLimiter *Limiter
 	ingestLimiter *Limiter
+	sshLimiter    *Limiter
 
 	alerts *alertEngine
 
@@ -61,9 +64,11 @@ func New(cfg *config.Config, st store.Store, logger *slog.Logger) *Server {
 		metrics:       metricsproxy.New(cfg.MetricsURL),
 		oidc:          oidc.NewManager(provs),
 		sec:           scanner.NewManager(logger),
+		ssh:           sshx.NewManager(logger, cfg.EnableSSHConsole),
 		loginLimiter:  NewLimiter(0.2, 5),  // ~5 attempts then 1 / 5s
 		enrollLimiter: NewLimiter(0.1, 3),  // strict on enrollment
 		ingestLimiter: NewLimiter(50, 100), // agent ingestion (per IP)
+		sshLimiter:    NewLimiter(0.2, 5),  // console dials: ~5 then 1 / 5s
 		alerts:        newAlertEngine(),
 	}
 }
@@ -106,6 +111,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/servers/{id}/metrics", s.requirePerm(rbac.ServerRead, s.handleMetrics))
 	mux.HandleFunc("GET /api/v1/servers/{id}/logs", s.requirePerm(rbac.ServerRead, s.handleLogs))
 
+	// SSH console. The only write path in Pulse: opt-in (PULSE_SSH_CONSOLE),
+	// owner/admin only, audited, and never routed through an agent.
+	mux.HandleFunc("GET /api/v1/ssh/capabilities", s.requirePerm(rbac.ServerRead, s.handleSSHCapabilities))
+	mux.Handle("POST /api/v1/servers/{id}/ssh/sessions",
+		s.sshLimiter.Middleware()(s.requirePerm(rbac.SSHExec, s.handleSSHOpen)))
+	mux.HandleFunc("GET /api/v1/servers/{id}/ssh/sessions/{sid}/attach", s.requirePerm(rbac.SSHExec, s.handleSSHAttach))
+	mux.HandleFunc("DELETE /api/v1/servers/{id}/ssh/sessions/{sid}", s.requirePerm(rbac.SSHExec, s.handleSSHClose))
+
 	// Agents & enrollment
 	mux.HandleFunc("POST /api/v1/agents/enrollment-tokens", s.requirePerm(rbac.ServerManage, s.handleCreateEnrollment))
 	mux.Handle("POST /api/v1/agents/enroll", s.enrollLimiter.Middleware()(http.HandlerFunc(s.handleEnroll)))
@@ -132,6 +145,9 @@ func (s *Server) Handler() http.Handler {
 	)
 }
 
+// Shutdown releases long-lived resources (open SSH consoles).
+func (s *Server) Shutdown() { s.ssh.Shutdown() }
+
 // HTTPServer returns a configured *http.Server with sane timeouts.
 func (s *Server) HTTPServer() *http.Server {
 	return &http.Server{
@@ -139,8 +155,11 @@ func (s *Server) HTTPServer() *http.Server {
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// The SSH console streams for as long as the operator keeps the
+		// terminal open; wsx.Accept clears these deadlines once it hijacks the
+		// connection, so ordinary requests keep their timeouts.
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 }
 

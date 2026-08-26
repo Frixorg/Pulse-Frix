@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 # Pulse control-plane API image. Default build uses the in-memory store; pass
-# --build-arg TAGS=pgx (and vendor pgx) for the PostgreSQL adapter.
+# --build-arg TAGS=pgx (and vendor pgx) for the PostgreSQL adapter, or
+# --build-arg TAGS=ssh for the browser SSH console. Tags combine:
+# --build-arg TAGS="pgx ssh".
 FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY go.mod ./

@@ -15,9 +15,12 @@ const (
 	AlertManage       Permission = "alert.manage"
 	EventRead         Permission = "event.read"
 	IntegrationManage Permission = "integration.manage"
-	UserManage        Permission = "user.manage"
-	OrgManage         Permission = "org.manage"
-	AuditRead         Permission = "audit.read"
+	// SSHExec gates the browser SSH console — the only capability in Pulse that
+	// can change a server. Viewers never hold it.
+	SSHExec    Permission = "ssh.exec"
+	UserManage Permission = "user.manage"
+	OrgManage  Permission = "org.manage"
+	AuditRead  Permission = "audit.read"
 )
 
 // rolePermissions maps each role to the permissions it grants.
@@ -28,11 +31,12 @@ var rolePermissions = map[model.Role]map[Permission]bool{
 	model.RoleAdmin: {
 		ServerRead: true, AlertRead: true, EventRead: true,
 		ServerManage: true, AlertManage: true, IntegrationManage: true, AuditRead: true,
+		SSHExec: true,
 	},
 	model.RoleOwner: {
 		ServerRead: true, AlertRead: true, EventRead: true,
 		ServerManage: true, AlertManage: true, IntegrationManage: true, AuditRead: true,
-		UserManage: true, OrgManage: true,
+		UserManage: true, OrgManage: true, SSHExec: true,
 	},
 }
 

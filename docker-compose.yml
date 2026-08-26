@@ -61,6 +61,9 @@ services:
       PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
       PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
       PULSE_BOOTSTRAP_ENROLLMENT_TOKEN: ${PULSE_BOOTSTRAP_ENROLLMENT_TOKEN:-}
+      # Browser SSH console — off by default, and inert unless the image was
+      # built with API_TAGS=ssh. See docs/SSH_CONSOLE.md.
+      PULSE_SSH_CONSOLE: ${PULSE_SSH_CONSOLE:-false}
     depends_on:
       pulse-postgres:
         condition: service_healthy

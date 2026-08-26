@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { onMounted, onBeforeUnmount, ref, watch, computed } from "vue";
 import * as echarts from "echarts";
 import type { MetricSeries } from "@/api/types";
 
@@ -12,6 +12,8 @@ const props = defineProps<{
   max?: number; // window end (ms)
   type?: "line" | "area" | "bar" | "gauge";
   names?: string[]; // legend names for multi-series
+  loading?: boolean; // a fetch is in flight — show it instead of pretending
+  loadingLabel?: string; // e.g. the range being fetched ("6h")
 }>();
 
 const el = ref<HTMLDivElement | null>(null);
@@ -160,22 +162,164 @@ onBeforeUnmount(() => {
   chart?.dispose();
 });
 watch(() => [props.series, props.min, props.max, props.unit, props.type], render, { deep: true });
+
+// True only when we have finished loading and genuinely have nothing to draw —
+// so an empty chart is never mistaken for stale data (and vice versa).
+const isEmpty = computed(() => !props.series.some((s) => s.points.length > 0));
 </script>
 
 <template>
   <div class="card">
-    <div class="card-title">{{ title }}</div>
-    <div ref="el" :class="type === 'gauge' ? 'gauge-h' : 'chart-h'"></div>
+    <div class="card-head">
+      <div class="card-title mb-0">{{ title }}</div>
+      <span v-if="loading" class="live-chip">
+        <span class="live-dot"></span>
+        {{ loadingLabel ? `Loading ${loadingLabel}…` : "Loading…" }}
+      </span>
+    </div>
+
+    <div class="chart-wrap" :class="type === 'gauge' ? 'gauge-h' : 'chart-h'">
+      <!-- The canvas stays mounted (echarts owns it) and is dimmed while a
+           fetch is in flight, so stale numbers are never shown as if fresh. -->
+      <div ref="el" class="canvas" :class="{ stale: loading }"></div>
+
+      <div v-if="loading" class="overlay" role="status" aria-live="polite">
+        <div class="shimmer"></div>
+        <div class="spinner" aria-hidden="true"></div>
+        <span class="overlay-text">
+          {{ loadingLabel ? `Fetching ${loadingLabel} of data…` : "Fetching data…" }}
+        </span>
+      </div>
+
+      <div v-else-if="isEmpty" class="overlay empty">
+        <span class="overlay-text">No data in this range</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.chart-h {
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  min-height: 18px;
+}
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-family: var(--pulse-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pulse-accent);
+  white-space: nowrap;
+}
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pulse-accent);
+  animation: mc-blink 1s ease-in-out infinite;
+}
+.chart-wrap {
+  position: relative;
   width: 100%;
+}
+.canvas {
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.18s ease, filter 0.18s ease;
+}
+.canvas.stale {
+  opacity: 0.22;
+  filter: saturate(0.4) blur(1px);
+  pointer-events: none;
+}
+.chart-h {
   height: 12rem;
 }
 .gauge-h {
-  width: 100%;
   height: 10rem;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.overlay.empty .overlay-text {
+  color: var(--pulse-text-muted);
+}
+.overlay-text {
+  position: relative;
+  font-size: 11.5px;
+  font-family: var(--pulse-font-mono);
+  color: var(--pulse-text-muted);
+  letter-spacing: 0.02em;
+}
+.spinner {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--pulse-border);
+  border-top-color: var(--pulse-accent);
+  animation: mc-spin 0.75s linear infinite;
+}
+/* A sweeping highlight makes "work is happening" obvious at a glance. */
+.shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(199, 245, 66, 0.07) 45%,
+    rgba(199, 245, 66, 0.12) 50%,
+    rgba(199, 245, 66, 0.07) 55%,
+    transparent 80%
+  );
+  background-size: 250% 100%;
+  animation: mc-sweep 1.25s ease-in-out infinite;
+}
+@keyframes mc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mc-sweep {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -40% 0;
+  }
+}
+@keyframes mc-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer,
+  .live-dot {
+    animation: none;
+  }
+  .spinner {
+    animation-duration: 2.4s;
+  }
 }
 </style>

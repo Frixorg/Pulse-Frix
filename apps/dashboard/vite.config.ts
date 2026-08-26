@@ -15,7 +15,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:8080", changeOrigin: true },
+      // ws:true is required for the SSH console: it upgrades
+      // /api/v1/servers/*/ssh/sessions/*/attach to a WebSocket.
+      "/api": { target: "http://localhost:8080", changeOrigin: true, ws: true },
       "/healthz": { target: "http://localhost:8080", changeOrigin: true },
     },
   },

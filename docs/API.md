@@ -121,6 +121,28 @@ Manage exporters/notifiers and org/server settings; writes require
 Read-only findings (SSH exposed, public DB port, weak/expired TLS, Docker exposure,
 unexpected listeners). **Reports only — never changes** security configuration.
 
+### SSH console — `/api/v1/servers/{id}/ssh`
+
+The only write path in the API, and the only one an agent is not involved in.
+Off unless `PULSE_SSH_CONSOLE=true` **and** the binary was built with
+`-tags ssh`; requires the `ssh.exec` permission (owner/admin — never viewer).
+
+- `GET /ssh/capabilities` — `{enabled, reason, default_port, can_use}`. The
+  dashboard uses `reason` to explain what an operator has to change.
+- `POST /servers/{id}/ssh/sessions` — dial the host and park a live session.
+  Body: `host`, `port`, `username`, `auth_method` (`password`|`key`), the
+  matching secret, optional `known_fingerprint`, `cols`, `rows`. Returns
+  `session_id` and the host key `fingerprint`. Credentials are used once and
+  never stored, logged or audited. A changed host key returns `409
+  SSH_HOST_KEY_MISMATCH` with the fingerprint actually offered.
+- `GET /servers/{id}/ssh/sessions/{sid}/attach` — WebSocket upgrade, authenticated
+  by the session cookie. Binary frames carry terminal bytes verbatim; text
+  frames carry `resize` and lifecycle messages.
+- `DELETE /servers/{id}/ssh/sessions/{sid}` — end the session.
+
+`ssh.connect` and `ssh.disconnect` are audited. See
+[SSH_CONSOLE.md](./SSH_CONSOLE.md).
+
 ### Audit — `/api/v1/audit`
 
 `GET /audit` (owner/admin) — sensitive operations with actor, action, result, IP.
@@ -137,6 +159,7 @@ never a full-page reload. Connection counts are themselves a Pulse metric.
 
 ## Rate limiting
 
-Authentication, login, enrollment, and agent ingestion are independently rate
-limited so a compromised agent cannot overwhelm the backend. `RATE_LIMITED`
+Authentication, login, enrollment, agent ingestion and SSH console dials are
+independently rate limited so a compromised agent — or a credential-stuffing
+attempt against a customer's own sshd — cannot overwhelm the backend. `RATE_LIMITED`
 responses include `Retry-After`.

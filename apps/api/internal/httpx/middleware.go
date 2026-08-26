@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -205,6 +206,24 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack lets the SSH console upgrade to a WebSocket through the logging
+// wrapper. Without this the wrapper hides http.Hijacker and the upgrade fails.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	w.status = http.StatusSwitchingProtocols
+	return hj.Hijack()
+}
+
+// Flush keeps streaming responses working through the wrapper.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func randomHex(n int) string {

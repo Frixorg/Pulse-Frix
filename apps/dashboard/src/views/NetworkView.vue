@@ -8,6 +8,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import StatCard from "@/components/cards/StatCard.vue";
 import MetricChart from "@/components/charts/MetricChart.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import { bytes } from "@/lib/format";
 
 const servers = useServersStore();
@@ -16,6 +17,8 @@ const all = ref<Resource[]>([]);
 const showAll = ref(false);
 const series = ref<MetricSeries[]>([]);
 const now = ref(Date.now());
+const loading = ref(false);
+const lastUpdated = ref<number | null>(null);
 
 function num(r: Resource, k: string): number {
   return Number(r.attributes?.[k] ?? 0);
@@ -28,18 +31,24 @@ function kind(name: string): "physical" | "bridge" | "virtual" | "other" {
 }
 
 async function load() {
-  if (!selected.value) return;
+  if (!selected.value || loading.value) return;
+  loading.value = true;
   now.value = Date.now();
   try {
-    const snap = await api.discovery(selected.value.id);
-    all.value = (snap.resources ?? []).filter((r) => r.type === "network_interface");
-  } catch {
-    all.value = [];
-  }
-  try {
-    series.value = (await api.metrics(selected.value.id, "network", "1h")).series ?? [];
-  } catch {
-    series.value = [];
+    try {
+      const snap = await api.discovery(selected.value.id);
+      all.value = (snap.resources ?? []).filter((r) => r.type === "network_interface");
+    } catch {
+      all.value = [];
+    }
+    try {
+      series.value = (await api.metrics(selected.value.id, "network", "1h")).series ?? [];
+    } catch {
+      series.value = [];
+    }
+    lastUpdated.value = Date.now();
+  } finally {
+    loading.value = false;
   }
 }
 onMounted(load);
@@ -60,8 +69,12 @@ const virtualCount = computed(() => all.value.filter((r) => kind(r.name) === "vi
 
 <template>
   <div>
-    <PageHeader title="Network" subtitle="Interfaces, throughput and traffic counters — read from /proc, read-only." />
-    <EmptyState v-if="all.length === 0" title="No interfaces discovered" />
+    <PageHeader title="Network" subtitle="Interfaces, throughput and traffic counters — read from /proc, read-only.">
+      <template #actions>
+        <RefreshButton :loading="loading" :updated-at="lastUpdated" :disabled="!selected" @refresh="load" />
+      </template>
+    </PageHeader>
+    <EmptyState v-if="all.length === 0 && !loading" title="No interfaces discovered" />
     <template v-else>
       <div class="stats">
         <StatCard label="Primary interface" :value="primary" />
@@ -71,7 +84,7 @@ const virtualCount = computed(() => all.value.filter((r) => kind(r.name) === "vi
       </div>
 
       <div class="chart">
-        <MetricChart title="Receive throughput (1h)" :series="series" unit="B/s" :min="now - 3600000" :max="now" />
+        <MetricChart title="Receive throughput (1h)" :series="series" unit="B/s" :min="now - 3600000" :max="now" :loading="loading" loading-label="1h" />
       </div>
 
       <div class="thead">

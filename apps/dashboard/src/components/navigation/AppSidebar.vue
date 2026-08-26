@@ -22,6 +22,7 @@ const nav: { name: string; label: string }[] = [
   { name: "storage", label: "Storage" },
   { name: "databases", label: "Databases" },
   { name: "logs", label: "Logs" },
+  { name: "ssh", label: "SSH" },
   { name: "alerts", label: "Alerts" },
   { name: "metrics", label: "Metrics" },
   { name: "infrastructure", label: "Infrastructure" },

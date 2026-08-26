@@ -46,6 +46,8 @@ Everything PulseFrix does is **read-only inspection**. It never starts, stops, e
 
 **It never:** modify a container, write to the Docker socket, edit Nginx/app config, open a firewall port, change SSH, or touch your databases. The install is **non-destructive by default** — see the [Safety Model](./docs/SAFETY_MODEL.md).
 
+The one exception is the opt-in **[SSH console](./docs/SSH_CONSOLE.md)**, where *you* type commands in a real terminal. Even then the agent is not involved: it stays read-only and still never accepts a command from the control plane.
+
 ---
 
 ## What you get
@@ -61,6 +63,7 @@ Everything PulseFrix does is **read-only inspection**. It never starts, stops, e
 | **Metrics** | CPU, memory, disk, network, load — **all at once**, live, drag-to-reorder, 1h→30d ranges, history |
 | **Logs** | Pick a container and **watch its logs live**; search, copy, and export — always escaped, never raw HTML |
 | **Alerts** | Define rules (metric threshold or container-down) with a for-duration + severity; live **pop-up** when one fires |
+| **SSH** | A real terminal on the server, in the browser — like PuTTY, with your own credentials. **Off by default**; the agent is not involved and stays read-only. See [SSH Console](./docs/SSH_CONSOLE.md) |
 | **Security** | A full read-only audit: exposure, TLS, base images, resource limits, **SSH hardening, privileged flag, blank/default credentials, shared SSH keys, shared memory, cipher suites, security headers, information leakage, rate limiting** — each with the exact resource, why it matters, and a fix. Re-run all or one check. |
 
 ---

@@ -223,3 +223,39 @@ export interface Page<T> {
   data: T[];
   next_cursor?: string;
 }
+
+// --- SSH console ---
+// The console is the only Pulse feature that can change a server. It is off
+// unless the operator enables it on the API, and viewers never get access.
+
+export interface SSHCapabilities {
+  enabled: boolean;
+  reason: string;
+  default_port: number;
+  can_use: boolean;
+}
+
+export type SSHAuthMethod = "password" | "key";
+
+export interface SSHOpenRequest {
+  host: string;
+  port: number;
+  username: string;
+  auth_method: SSHAuthMethod;
+  password?: string;
+  private_key?: string;
+  passphrase?: string;
+  known_fingerprint?: string;
+  cols: number;
+  rows: number;
+}
+
+export interface SSHSession {
+  session_id: string;
+  host: string;
+  port: number;
+  username: string;
+  fingerprint: string;
+  first_connection: boolean;
+  attach_within_sec: number;
+}

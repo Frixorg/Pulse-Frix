@@ -7,6 +7,7 @@ import type { MetricSeries } from "@/api/types";
 import PageHeader from "@/components/PageHeader.vue";
 import MetricChart from "@/components/charts/MetricChart.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 
 const servers = useServersStore();
 const { selected } = storeToRefs(servers);
@@ -43,6 +44,16 @@ const now = ref(Date.now());
 const dragging = ref<string | null>(null);
 const order = ref<string[]>(loadOrder());
 
+// `loading` drives the per-chart overlays. It is only set for user-initiated
+// loads (mount, server switch, range change, manual refresh) — the 15s silent
+// poll must never flash the UI. `pendingRange` is the range being fetched, so
+// the range switcher can show which button you are waiting on.
+const loading = ref(false);
+const pendingRange = ref<string | null>(null);
+const lastUpdated = ref<number | null>(null);
+const loadError = ref("");
+let reqSeq = 0;
+
 const allMetrics = [...new Set([...GAUGES.map((g) => g.id), ...DEFAULT_PANELS.flatMap((p) => p.metrics)])];
 
 function loadOrder(): string[] {
@@ -70,23 +81,51 @@ const panelsOrdered = computed(() => order.value.map((id) => DEFAULT_PANELS.find
 const windowStart = computed(() => now.value - RANGE_MS[range.value]);
 const windowEnd = computed(() => now.value);
 
-async function load() {
+async function load(silent = false) {
   if (!selected.value) return;
-  now.value = Date.now();
   const id = selected.value.id;
-  const results = await Promise.all(
-    allMetrics.map(async (m) => {
-      const resp = await api.metrics(id, m, range.value).catch(() => ({ series: [] as MetricSeries[] }));
-      return [m, resp.series ?? []] as const;
-    }),
-  );
-  data.value = Object.fromEntries(results);
+  const wanted = range.value;
+  const seq = ++reqSeq;
+
+  if (!silent) {
+    loading.value = true;
+    pendingRange.value = wanted;
+    loadError.value = "";
+  }
+  try {
+    const results = await Promise.all(
+      allMetrics.map(async (m) => {
+        const resp = await api.metrics(id, m, wanted).catch(() => ({ series: [] as MetricSeries[] }));
+        return [m, resp.series ?? []] as const;
+      }),
+    );
+    // A slower earlier request must not overwrite a newer one (rapid range
+    // clicking would otherwise land you on the wrong data).
+    if (seq !== reqSeq) return;
+    now.value = Date.now();
+    data.value = Object.fromEntries(results);
+    lastUpdated.value = Date.now();
+  } catch (e) {
+    if (seq === reqSeq && !silent) loadError.value = e instanceof Error ? e.message : "failed to load metrics";
+  } finally {
+    if (seq === reqSeq && !silent) {
+      loading.value = false;
+      pendingRange.value = null;
+    }
+  }
 }
-onMounted(load);
-watch([selected, range], load);
+
+function setRange(r: string) {
+  if (r === range.value || loading.value) return;
+  range.value = r;
+}
+
+onMounted(() => load());
+watch([selected, range], () => load());
 let timer: number | undefined;
 onMounted(() => {
-  timer = window.setInterval(load, 15000);
+  // Background poll: refreshes numbers without ever showing a loading state.
+  timer = window.setInterval(() => load(true), 15000);
 });
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer);
@@ -116,16 +155,42 @@ function onDrop(target: string) {
     <PageHeader
       title="Metrics"
       subtitle="Live host metrics — CPU (incl. user/system/iowait), load, memory, swap, disk usage + I/O, and bandwidth. Drag panels to reorder."
-    />
+    >
+      <template #actions>
+        <RefreshButton :loading="loading" :updated-at="lastUpdated" :disabled="!selected" @refresh="load()" />
+      </template>
+    </PageHeader>
     <EmptyState v-if="!selected" title="No server selected" />
     <template v-else>
-      <div class="ranges">
-        <button v-for="r in ranges" :key="r" class="range" :class="{ on: range === r }" @click="range = r">{{ r }}</button>
+      <div class="range-row">
+        <div class="ranges" :class="{ busy: loading }" role="group" aria-label="Time range">
+          <button
+            v-for="r in ranges"
+            :key="r"
+            class="range"
+            :class="{ on: range === r, pending: pendingRange === r }"
+            :disabled="loading && pendingRange !== r"
+            :aria-pressed="range === r"
+            @click="setRange(r)"
+          >
+            <span v-if="pendingRange === r" class="range-spin" aria-hidden="true"></span>
+            {{ r }}
+          </button>
+        </div>
+        <span v-if="loading" class="range-note">Loading {{ pendingRange }} of history…</span>
+        <span v-else-if="loadError" class="range-err">{{ loadError }}</span>
       </div>
 
       <div class="gauges">
         <div v-for="g in GAUGES" :key="g.id" class="gauge-card">
-          <MetricChart :title="`${g.title} (now)`" :series="gaugeSeries(g.id)" type="gauge" unit="%" />
+          <MetricChart
+            :title="`${g.title} (now)`"
+            :series="gaugeSeries(g.id)"
+            type="gauge"
+            unit="%"
+            :loading="loading"
+            :loading-label="pendingRange ?? undefined"
+          />
         </div>
       </div>
 
@@ -150,6 +215,8 @@ function onDrop(target: string) {
             :names="p.names"
             :min="windowStart"
             :max="windowEnd"
+            :loading="loading"
+            :loading-label="pendingRange ?? undefined"
           />
         </div>
       </div>
@@ -158,6 +225,13 @@ function onDrop(target: string) {
 </template>
 
 <style scoped>
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
 .ranges {
   display: inline-flex;
   gap: 4px;
@@ -165,9 +239,14 @@ function onDrop(target: string) {
   border-radius: 12px;
   background: var(--pulse-surface);
   border: 1px solid var(--pulse-border);
-  margin-bottom: 16px;
+}
+.ranges.busy {
+  border-color: rgba(199, 245, 66, 0.4);
 }
 .range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   background: transparent;
   color: var(--pulse-text-muted);
@@ -178,13 +257,51 @@ function onDrop(target: string) {
   cursor: pointer;
   transition: all 0.15s;
 }
-.range:hover {
+.range:hover:not(:disabled) {
   color: var(--pulse-text);
+}
+.range:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .range.on {
   background: var(--pulse-accent);
   color: var(--pulse-accent-ink);
   font-weight: 700;
+}
+/* The range you just clicked keeps its own spinner, so it is obvious which
+   window is being fetched — not just that "something" is loading. */
+.range.pending {
+  opacity: 1;
+}
+.range-spin {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  opacity: 0.85;
+  animation: range-spin 0.7s linear infinite;
+}
+@keyframes range-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.range-note {
+  font-size: 12px;
+  font-family: var(--pulse-font-mono);
+  color: var(--pulse-accent);
+}
+.range-err {
+  font-size: 12px;
+  font-family: var(--pulse-font-mono);
+  color: var(--pulse-down);
+}
+@media (prefers-reduced-motion: reduce) {
+  .range-spin {
+    animation-duration: 2.4s;
+  }
 }
 .gauges {
   display: grid;

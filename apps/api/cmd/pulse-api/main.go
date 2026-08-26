@@ -56,6 +56,9 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 	}
+	// Hijacked connections (open SSH consoles) are not covered by
+	// http.Server.Shutdown, so close them explicitly.
+	srv.Shutdown()
 }
 
 // bootstrapOwner seeds an initial owner account from the environment when the

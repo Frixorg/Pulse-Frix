@@ -7,6 +7,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
 import CustomSelect from "@/components/CustomSelect.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 
 const props = defineProps<{
   title: string;
@@ -20,6 +21,7 @@ const servers = useServersStore();
 const { selected } = storeToRefs(servers);
 const rows = ref<Resource[]>([]);
 const loading = ref(false);
+const lastUpdated = ref<number | null>(null);
 
 const UNGROUPED = "__ungrouped__";
 
@@ -179,10 +181,12 @@ async function load() {
     rows.value = [];
     return;
   }
+  if (loading.value) return;
   loading.value = true;
   try {
     const page = await props.loader(selected.value.id);
     rows.value = page.data ?? [];
+    lastUpdated.value = Date.now();
   } catch {
     rows.value = [];
   } finally {
@@ -199,7 +203,11 @@ watch(selected, load);
 
 <template>
   <div>
-    <PageHeader :title="title" :subtitle="subtitle" />
+    <PageHeader :title="title" :subtitle="subtitle">
+      <template #actions>
+        <RefreshButton :loading="loading" :updated-at="lastUpdated" :disabled="!selected" @refresh="load" />
+      </template>
+    </PageHeader>
     <EmptyState v-if="!selected" title="No server selected" message="Connect a server to see this view." />
     <EmptyState
       v-else-if="!loading && rows.length === 0"

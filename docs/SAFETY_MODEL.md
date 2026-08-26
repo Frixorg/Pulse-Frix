@@ -186,6 +186,32 @@ manifest.
 
 ---
 
+## The SSH console — the one explicit exception
+
+The dashboard's **SSH** tab opens a real terminal on a server. It is the only
+feature in Pulse that can change one, so it is fenced off rather than folded
+into the observability path:
+
+- It is **off by default**, twice over: the standard API build contains no SSH
+  client at all (it is compiled in only with `-tags ssh`), and even that build
+  stays inert unless `PULSE_SSH_CONSOLE=true`.
+- It requires the `ssh.exec` permission — owners and admins only. No
+  configuration gives a viewer a shell.
+- **The agent is not involved.** The API dials the host over SSH like any other
+  client. Agents remain read-only and still never accept a command from the
+  control plane, so Golden Rule 7 below is untouched: it forbids the *agent*
+  executing what the cloud tells it to, not an operator typing into their own
+  terminal.
+- Credentials are typed per session, used for one dial, and never written to the
+  database, the logs or an audit record. The audit trail records who connected,
+  to which host, and when.
+- Host keys are pinned per host in the browser; a changed key stops the
+  connection until the operator explicitly accepts the new one.
+
+See [SSH_CONSOLE.md](./SSH_CONSOLE.md) for the full description.
+
+---
+
 ## Golden Rules
 
 These are non-negotiable and enforced in code review and CI:

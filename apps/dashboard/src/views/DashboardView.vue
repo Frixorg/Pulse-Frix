@@ -9,6 +9,7 @@ import StatCard from "@/components/cards/StatCard.vue";
 import MetricChart from "@/components/charts/MetricChart.vue";
 import HealthBadge from "@/components/status/HealthBadge.vue";
 import OnboardingConnect from "@/components/OnboardingConnect.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import { bytes, uptime, tone, timeAgo } from "@/lib/format";
 
 const servers = useServersStore();
@@ -19,12 +20,18 @@ const events = ref<EventItem[]>([]);
 const cpu = ref<MetricSeries[]>([]);
 const mem = ref<MetricSeries[]>([]);
 const loading = ref(false);
+const lastUpdated = ref<number | null>(null);
+const error = ref("");
 
 const c = computed(() => summary.value?.counts);
 
+// Re-runs the whole page check: summary, counts, recent events and both charts.
+// Also refreshes the server list, so a VPS that has just connected (or gone
+// away) shows up without a page reload.
 async function load() {
-  if (!selected.value) return;
+  if (!selected.value || loading.value) return;
   loading.value = true;
+  error.value = "";
   const id = selected.value.id;
   try {
     const [s, ev, cpuM, memM] = await Promise.all([
@@ -37,9 +44,17 @@ async function load() {
     events.value = ev.data;
     cpu.value = cpuM.series;
     mem.value = memM.series;
+    lastUpdated.value = Date.now();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "failed to refresh";
   } finally {
     loading.value = false;
   }
+}
+
+async function refresh() {
+  await servers.load().catch(() => undefined);
+  await load();
 }
 
 onMounted(load);
@@ -51,7 +66,25 @@ watch(selected, load);
     <OnboardingConnect v-if="!selected" />
 
     <template v-else>
-      <PageHeader title="Dashboard" subtitle="Is my infrastructure healthy?" />
+      <PageHeader title="Dashboard" subtitle="Is my infrastructure healthy?">
+        <template #actions>
+          <div class="head-actions">
+            <RefreshButton
+              variant="solid"
+              label="Re-check"
+              busy-label="Re-checking…"
+              title="Re-run the check: pull the newest report the agent has sent for this server"
+              :loading="loading"
+              :updated-at="lastUpdated"
+              @refresh="refresh"
+            />
+            <span v-if="summary?.server?.last_seen_at" class="agent-age">
+              Agent last reported {{ timeAgo(summary.server.last_seen_at) }}
+            </span>
+            <span v-if="error" class="head-err">{{ error }}</span>
+          </div>
+        </template>
+      </PageHeader>
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-3">
         <div class="card">
           <div class="card-title">VPS Health</div>
@@ -100,8 +133,8 @@ watch(selected, load);
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
-        <MetricChart title="CPU (1h)" :series="cpu" />
-        <MetricChart title="Memory (1h)" :series="mem" />
+        <MetricChart title="CPU (1h)" :series="cpu" :loading="loading" loading-label="1h" />
+        <MetricChart title="Memory (1h)" :series="mem" :loading="loading" loading-label="1h" />
       </div>
 
       <div class="card">
@@ -123,3 +156,22 @@ watch(selected, load);
     </template>
   </div>
 </template>
+
+<style scoped>
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.agent-age {
+  font-size: 11.5px;
+  font-family: var(--pulse-font-mono);
+  color: var(--pulse-text-muted);
+}
+.head-err {
+  font-size: 11.5px;
+  font-family: var(--pulse-font-mono);
+  color: var(--pulse-down);
+}
+</style>

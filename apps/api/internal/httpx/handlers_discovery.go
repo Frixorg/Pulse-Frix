@@ -113,7 +113,8 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	services := s.resourcesOfType(snap, "docker_container", "database", "nginx_vhost",
-		"reverse_proxy", "application", "systemd_unit", "existing_monitoring")
+		"apache_vhost", "caddy_site", "traefik_router", "haproxy_frontend",
+		"reverse_proxy", "application", "systemd_unit", "initd_service", "existing_monitoring")
 	JSON(w, http.StatusOK, Page{Data: services})
 }
 

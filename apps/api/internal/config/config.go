@@ -40,6 +40,10 @@ type Config struct {
 	// ssh.exec permission (owner/admin only). Set PULSE_SSH_CONSOLE=false to
 	// remove the terminal entirely.
 	EnableSSHConsole bool
+	// EnableSetupWizard offers the first-boot provisioning wizard at /setup when
+	// no account exists yet. It closes itself the moment one does. Set
+	// PULSE_SETUP_WIZARD=false to require ADMIN_EMAIL/ADMIN_PASSWORD instead.
+	EnableSetupWizard bool
 
 	// Public base URL (used to build OIDC redirect URIs), e.g. https://pulse.frix.me.
 	PublicURL string
@@ -77,7 +81,7 @@ func boolEnv(k string, def bool) bool {
 
 // Load builds the configuration from the environment with safe defaults.
 func Load() *Config {
-	mode := env("PULSE_MODE", "local")
+	mode := resolveMode()
 	tenancy := SingleTenant
 	if mode == "cloud" {
 		tenancy = MultiTenant
@@ -99,6 +103,7 @@ func Load() *Config {
 		EnableRemoteActions:  boolEnv("ENABLE_REMOTE_ACTIONS", false),
 		EnableAutoUpdate:     boolEnv("ENABLE_AUTO_UPDATE", false),
 		EnableSSHConsole:     boolEnv("PULSE_SSH_CONSOLE", true),
+		EnableSetupWizard:    boolEnv("PULSE_SETUP_WIZARD", true),
 	}
 
 	// Public URL for OIDC redirects: explicit PULSE_PUBLIC_URL, else derived
@@ -131,6 +136,27 @@ func Load() *Config {
 	}
 	return c
 }
+
+// resolveMode determines the deployment mode. PULSE_MODE is the canonical
+// name; APP_MODE=self_hosted and IS_SELF_HOSTED=true are accepted aliases so a
+// single .env can drive the API, the agent and the dashboard build.
+func resolveMode() string {
+	if m := strings.ToLower(env("PULSE_MODE", "")); m != "" {
+		return m
+	}
+	appMode := strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(env("APP_MODE", "")))
+	if appMode == "self_hosted" || appMode == "selfhosted" || boolEnv("IS_SELF_HOSTED", false) {
+		return "local"
+	}
+	if appMode == "cloud" {
+		return "cloud"
+	}
+	return "local"
+}
+
+// SelfHosted reports whether this control plane runs on the operator's own VPS
+// (single-tenant) rather than as Pulse Cloud.
+func (c *Config) SelfHosted() bool { return c.Mode != "cloud" }
 
 // OIDCProviderByName returns a configured provider by its url slug.
 func (c *Config) OIDCProviderByName(name string) (OIDCProvider, bool) {

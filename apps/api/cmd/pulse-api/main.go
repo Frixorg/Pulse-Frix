@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,17 +62,33 @@ func main() {
 	srv.Shutdown()
 }
 
-// bootstrapOwner seeds an initial owner account from the environment when the
-// store is empty. Intended for first-run/self-hosted setup and development.
-// The password is provided out-of-band (env), never hardcoded.
+// bootstrapOwner seeds the initial administrator from the environment when the
+// store holds no account yet. This is the installer's provisioning path; when
+// the variables are unset the API instead offers the first-boot wizard at
+// /setup (see internal/httpx/handlers_setup.go).
+//
+// ADMIN_EMAIL / ADMIN_PASSWORD are the documented names; the older
+// PULSE_BOOTSTRAP_* pair still works so existing .env files keep running. The
+// password is always provided out-of-band and only its PBKDF2 hash is stored.
 func bootstrapOwner(st store.Store, logger *slog.Logger) {
-	email := os.Getenv("PULSE_BOOTSTRAP_EMAIL")
-	password := os.Getenv("PULSE_BOOTSTRAP_PASSWORD")
+	email := auth.NormalizeEmail(firstEnv("ADMIN_EMAIL", "PULSE_BOOTSTRAP_EMAIL"))
+	password := firstEnv("ADMIN_PASSWORD", "PULSE_BOOTSTRAP_PASSWORD")
 	if email == "" || password == "" {
+		return
+	}
+	if err := auth.ValidateEmail(email); err != nil {
+		logger.Error("bootstrap: ADMIN_EMAIL is not valid", "error", err)
 		return
 	}
 	if _, _, err := st.FindLoginByEmail(email); err == nil {
 		return // already exists
+	}
+	// A weak seeded password is refused outright rather than silently baked
+	// into a deployment that is about to be exposed to the internet.
+	if err := auth.ValidatePasswordPolicy(password, email); err != nil {
+		logger.Error("bootstrap: ADMIN_PASSWORD rejected", "error", err,
+			"hint", "set a stronger value, or leave it unset and use the /setup wizard")
+		return
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
@@ -82,7 +99,17 @@ func bootstrapOwner(st store.Store, logger *slog.Logger) {
 		logger.Warn("bootstrap: could not seed owner", "error", err)
 		return
 	}
-	logger.Info("bootstrap: seeded initial owner", "email", email)
+	logger.Info("bootstrap: seeded initial administrator", "email", email)
+}
+
+// firstEnv returns the first non-empty environment variable among keys.
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // bootstrapEnrollment seeds a single enrollment token (from the environment) so
@@ -91,7 +118,7 @@ func bootstrapOwner(st store.Store, logger *slog.Logger) {
 // is provided out-of-band (env) and only its hash is stored.
 func bootstrapEnrollment(st store.Store, logger *slog.Logger, cfg *config.Config) {
 	plain := os.Getenv("PULSE_BOOTSTRAP_ENROLLMENT_TOKEN")
-	ownerEmail := os.Getenv("PULSE_BOOTSTRAP_EMAIL")
+	ownerEmail := auth.NormalizeEmail(firstEnv("ADMIN_EMAIL", "PULSE_BOOTSTRAP_EMAIL"))
 	if plain == "" || ownerEmail == "" {
 		return
 	}

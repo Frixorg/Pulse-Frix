@@ -41,18 +41,18 @@ Discovery Engine
 ├── Docker Detector             daemon reachability, version, info
 ├── Container Detector          containers + stats (ro)
 ├── Compose Detector            compose files → project→service map (read-only)
-├── Systemd Detector            unit list + active state
+├── Systemd Detector            running + failed units (systemctl, else cgroups)
+├── SysV Init Detector          /etc/init.d scripts + matching live process
 ├── Nginx Detector              vhosts, upstreams, TLS, listen ports
-├── Apache Detector             vhosts, modules
-├── Caddy Detector              sites, automatic TLS
-├── Traefik Detector            routers, services, entrypoints
+├── Reverse Proxy Detector      Apache, Caddy, Traefik, HAProxy, /etc/hosts
 ├── PostgreSQL Detector         reachability (ro), version
 ├── MySQL/MariaDB Detector      reachability (ro)
 ├── Redis Detector              PING, INFO (ro)
 ├── MongoDB Detector            reachability (ro)
 ├── Node.js / Python / Java / Go / PHP Detectors  runtime + framework heuristics
-├── Process Detector            top CPU/mem, zombies, failed services
-├── Port Detector               listening sockets + free-port finder
+├── SQLite Detector             database files held open by a live process
+├── Process Detector            top CPU/mem, zombies, host vs container split
+├── Port Detector               listening sockets + owning PID/unit/container
 ├── Network Detector            interfaces, connections, states
 ├── Filesystem Detector         mounts, capacity, inodes, IO
 ├── SSL Detector                cert chains, expiry
@@ -108,6 +108,84 @@ listen ports, HTTP/2, compression, caching, redirects. If richer instrumentation
 would require modifying Nginx, Pulse does **not** do it automatically — it offers a
 previewed, validated, backed-up, reversible change behind explicit confirmation.
 See [SAFETY_MODEL.md](./SAFETY_MODEL.md).
+
+---
+
+## Other reverse proxies
+
+Nginx has its own detector; **Apache, Caddy, Traefik and HAProxy** share the
+Reverse Proxy Detector, and every one of them is parse-only — no config file is
+rewritten and no proxy is ever reloaded.
+
+| Engine | Read from | Extracted |
+|--------|-----------|-----------|
+| Apache | `/etc/apache2/{sites-enabled,sites-available,conf.d}`, `/etc/httpd/{conf.d,sites-enabled,vhosts.d}`, the main `httpd.conf` | `ServerName`, `ServerAlias`, `DocumentRoot`, `SSLEngine`, `SSLCertificateFile`, `ProxyPass` |
+| Caddy | `/etc/caddy/Caddyfile`, `conf.d/*`, `sites-enabled/*` | site addresses, `reverse_proxy` upstreams, `root` |
+| Traefik | `/etc/traefik/*.{yml,yaml,toml}`, `dynamic/*`, `conf.d/*` | every host in a ``Host(`…`)`` matcher |
+| HAProxy | `/etc/haproxy/haproxy.cfg`, `conf.d/*` | frontends, `bind` (incl. TLS), `hdr(host)` ACLs, backends and their servers |
+| hosts | `/etc/hosts` | static name → address mappings, minus the stock localhost entries |
+
+Traefik is most often configured entirely through **Docker labels**, which never
+reach a file the agent could parse. Those routers are derived in the API from
+the container inventory instead, so a label-only Traefik still populates the
+Domains view.
+
+Every path is read under `PULSE_ROOTFS`, so a containerised agent with
+`/:/host:ro` sees the operator's real configuration rather than its own image.
+
+---
+
+## Port → process attribution
+
+Listening sockets come from the `/proc/net/*` tables. Attributing each one to
+the process behind it — the correlation `ss -tulpn` and `lsof -i` perform — is
+done by matching socket inodes against `/proc/<pid>/fd`, so it needs no binary
+on the host and no shell.
+
+From the owning process's cgroup the agent also learns its **systemd unit** and
+**container id**, which is what separates host-native workloads from
+containerised ones throughout the dashboard.
+
+Two deployment details decide how much of this works:
+
+- `/proc/net/*` is always the *caller's* network namespace. The agent therefore
+  reads `/proc/1/net/*` when it is readable: with `pid: host` that is the host's
+  namespace, and without it PID 1 is the same namespace anyway.
+- Reading another process's descriptors needs root or `CAP_SYS_PTRACE`. Without
+  it, ports are still discovered — they are reported as **unattributed** in the
+  inventory rather than silently dropped.
+
+For a host-installed agent running unprivileged, setting `PULSE_USE_SUDO=true`
+lets exactly two read-only commands retry through `sudo -n`
+(`systemctl list-units …` and `ss -tulpnH`), with a fixed argument vector and a
+least-privilege rule in
+[`infrastructure/pulse-discovery.sudoers`](../infrastructure/pulse-discovery.sudoers).
+This is the only place in the agent that may escalate, it is off by default, and
+the direct call is always tried first.
+
+---
+
+## Databases
+
+Engines are found two ways:
+
+- **By listening port**, correlated with the owning process, so a Postgres on
+  5432 is reported together with the PID, unit or container behind it.
+- **By open file**, for SQLite — which has no port at all. Candidate paths come
+  from the descriptors live processes hold open, and each one is confirmed by
+  reading its 16-byte `SQLite format 3` header. The database is never opened as
+  a database and nothing is written.
+
+Reachability is a read-only TCP connect. No application credentials are ever
+required or used.
+
+---
+
+## Unified inventory
+
+Each detector answers one question well; operators ask a different one. The API
+correlates the snapshot into a single host-vs-container workload list at
+`GET /servers/{id}/inventory` — see [API.md](./API.md#inventory).
 
 ---
 

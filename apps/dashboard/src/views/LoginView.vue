@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { useRouter, useRoute, RouterLink } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { api, ApiError } from "@/api/client";
+import { SELF_HOSTED } from "@/lib/mode";
 import AtmosphereBg from "@/components/AtmosphereBg.vue";
 
 const auth = useAuthStore();
@@ -56,10 +57,15 @@ async function submit() {
   <div class="login">
     <AtmosphereBg />
     <div class="login-in">
-      <RouterLink to="/" class="brand">
+      <!-- Self-hosted builds have no marketing landing to go back to. -->
+      <RouterLink v-if="!SELF_HOSTED" to="/" class="brand">
         <span class="brand-dot"></span>
         <span class="brand-name">PulseFrix</span>
       </RouterLink>
+      <div v-else class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">PulseFrix</span>
+      </div>
 
       <div class="glass">
         <h1 class="title">Welcome back</h1>
@@ -86,7 +92,7 @@ async function submit() {
 
           <div class="or"><span></span>or<span></span></div>
 
-          <RouterLink to="/self-hosted" class="host-btn">
+          <RouterLink v-if="!SELF_HOSTED" to="/self-hosted" class="host-btn">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="3" y="4" width="18" height="8" rx="2" />
               <rect x="3" y="14" width="18" height="6" rx="2" />
@@ -105,7 +111,7 @@ async function submit() {
             <input v-model="password" type="password" autocomplete="current-password" class="fld" required />
             <button class="lime-btn" :disabled="busy">{{ busy ? "Signing in…" : "Sign in" }}</button>
           </form>
-          <RouterLink to="/self-hosted" class="host-link">Setup guide</RouterLink>
+          <RouterLink v-if="!SELF_HOSTED" to="/self-hosted" class="host-link">Setup guide</RouterLink>
         </template>
       </div>
 

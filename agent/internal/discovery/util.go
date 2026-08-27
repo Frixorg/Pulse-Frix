@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,10 +42,60 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// readable reports whether a file can actually be opened for reading. Files
+// under /proc often exist for callers that are not permitted to read them, so
+// os.Stat alone is not enough.
+func readable(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+// hostRoot is the prefix under which the HOST filesystem is visible. It is ""
+// for an agent installed directly on the VPS and typically "/host" when the
+// agent runs containerised with the host root bind-mounted read-only
+// (PULSE_ROOTFS — see infrastructure/docker-compose.agent.yml).
+func hostRoot() string {
+	return strings.TrimRight(os.Getenv("PULSE_ROOTFS"), "/")
+}
+
+// hostPath maps an absolute host path into the agent's view of the filesystem.
+// Always use it for anything read out of /etc, /var or /run.
+func hostPath(p string) string { return hostRoot() + p }
+
+// hostGlob expands a host-absolute glob pattern under the host rootfs.
+func hostGlob(pattern string) []string {
+	m, _ := filepath.Glob(hostPath(pattern))
+	return m
+}
+
+// hostFileExists reports whether an absolute host path exists.
+func hostFileExists(p string) bool { return fileExists(hostPath(p)) }
+
+// displayPath strips the rootfs prefix so the dashboard shows the path as the
+// operator knows it (/etc/nginx/..., not /host/etc/nginx/...).
+func displayPath(p string) string {
+	root := hostRoot()
+	if root != "" && strings.HasPrefix(p, root+"/") {
+		return strings.TrimPrefix(p, root)
+	}
+	return p
+}
+
 // atoiHex parses a hex string (used for /proc/net socket tables).
 func atoiHex(s string) int {
 	n, _ := strconv.ParseInt(strings.TrimSpace(s), 16, 64)
 	return int(n)
+}
+
+// atoiDec parses an unsigned decimal field (e.g. a socket inode). Unparseable
+// values become 0, which every caller already treats as "unknown".
+func atoiDec(s string) uint64 {
+	n, _ := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	return n
 }
 
 // tcpProbe attempts a TCP connection and reports success within the timeout.

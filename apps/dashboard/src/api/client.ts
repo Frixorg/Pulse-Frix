@@ -5,8 +5,10 @@ import type {
   Server,
   ServerSummary,
   SessionInfo,
+  SetupStatus,
   Resource,
   DomainView,
+  InventoryResponse,
   SecurityAudit,
   ScanState,
   ScanMode,
@@ -92,6 +94,23 @@ export const api = {
   session: () => request<SessionInfo>("/auth/session"),
   authProviders: () => request<{ providers: { name: string; start: string }[] }>("/auth/providers"),
 
+  // first-boot provisioning
+  setupStatus: () => request<SetupStatus>("/setup/status"),
+  completeSetup: (email: string, password: string) =>
+    request<SessionInfo>("/setup", { method: "POST", body: JSON.stringify({ email, password }) }),
+
+  // account self-service (Settings → Security)
+  updateEmail: (currentPassword: string, email: string) =>
+    request<SessionInfo>("/account/email", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, email }),
+    }),
+  updatePassword: (currentPassword: string, newPassword: string) =>
+    request<SessionInfo>("/account/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
   // servers
   servers: () => request<Page<Server>>("/servers"),
   server: (id: string) => request<Server>(`/servers/${id}`),
@@ -106,6 +125,7 @@ export const api = {
   databases: (id: string) => request<Page<Resource>>(`/servers/${id}/databases`),
   applications: (id: string) => request<Page<Resource>>(`/servers/${id}/applications`),
   domains: (id: string) => request<Page<DomainView>>(`/servers/${id}/domains`),
+  inventory: (id: string) => request<InventoryResponse>(`/servers/${id}/inventory`),
   security: (id: string) => request<SecurityAudit>(`/servers/${id}/security`),
   startSecurityScan: (id: string, body: { mode?: ScanMode; categories?: string[] }) =>
     request<{ scan_id: string }>(`/servers/${id}/security/scan`, { method: "POST", body: JSON.stringify(body) }),

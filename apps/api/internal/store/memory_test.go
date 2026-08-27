@@ -67,3 +67,69 @@ func TestRevokedAgentNotReturned(t *testing.T) {
 		t.Fatal("revoked agent must not be returned")
 	}
 }
+
+func TestCountUsers(t *testing.T) {
+	m := NewMemory()
+	if n, err := m.CountUsers(); err != nil || n != 0 {
+		t.Fatalf("a fresh store holds no accounts: got %d, %v", n, err)
+	}
+	if _, _, err := m.SeedOrgOwner("A", "a@example.com", "hash"); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	if n, _ := m.CountUsers(); n != 1 {
+		t.Fatalf("got %d", n)
+	}
+}
+
+func TestUpdateUserEmail(t *testing.T) {
+	m := NewMemory()
+	org, user, _ := m.SeedOrgOwner("A", "old@example.com", "hash")
+
+	if err := m.UpdateUserEmail(org.ID, user.ID, "new@example.com"); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if _, _, err := m.FindLoginByEmail("new@example.com"); err != nil {
+		t.Error("the new address should resolve to the account")
+	}
+	if _, _, err := m.FindLoginByEmail("old@example.com"); err == nil {
+		t.Error("the old address must stop resolving")
+	}
+
+	// A second account cannot take an address that is already in use.
+	orgB, userB, _ := m.SeedOrgOwner("B", "b@example.com", "hash")
+	if err := m.UpdateUserEmail(orgB.ID, userB.ID, "new@example.com"); err != ErrAlreadyExists {
+		t.Errorf("expected ErrAlreadyExists, got %v", err)
+	}
+	// And no other tenant can touch this user.
+	if err := m.UpdateUserEmail(orgB.ID, user.ID, "hijack@example.com"); err != ErrNotFound {
+		t.Errorf("cross-tenant update should be ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateUserPasswordAndSessionRevocation(t *testing.T) {
+	m := NewMemory()
+	org, user, _ := m.SeedOrgOwner("A", "a@example.com", "old-hash")
+
+	other := &model.Session{ID: "sess-1", UserID: user.ID, OrgID: org.ID, ExpiresAt: time.Now().Add(time.Hour)}
+	current := &model.Session{ID: "sess-2", UserID: user.ID, OrgID: org.ID, ExpiresAt: time.Now().Add(time.Hour)}
+	_ = m.CreateSession(other)
+	_ = m.CreateSession(current)
+
+	if err := m.UpdateUserPassword(org.ID, user.ID, "new-hash"); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	got, _, _ := m.FindLoginByEmail("a@example.com")
+	if got.PasswordHash != "new-hash" {
+		t.Errorf("password hash was not replaced: %q", got.PasswordHash)
+	}
+
+	// Every session dies with the old password.
+	if err := m.DeleteSessionsForUser(user.ID); err != nil {
+		t.Fatalf("revocation failed: %v", err)
+	}
+	for _, id := range []string{"sess-1", "sess-2"} {
+		if _, err := m.GetSession(id); err == nil {
+			t.Errorf("session %s survived the password change", id)
+		}
+	}
+}

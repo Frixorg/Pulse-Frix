@@ -61,6 +61,18 @@ func (s *Server) issueSession(w http.ResponseWriter, orgID, userID string) error
 	return nil
 }
 
+// clearSessionCookie expires the session cookie in the browser. Its attributes
+// must match the ones issueSession set, or the browser keeps the old cookie.
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+}
+
 // decodeJSON reads a size-limited JSON body, rejecting unknown fields.
 func decodeJSON(r *http.Request, v any, maxBytes int64) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxBytes))

@@ -154,6 +154,50 @@ func (m *Memory) GetUser(orgID, userID string) (*model.User, error) {
 	return u, nil
 }
 
+func (m *Memory) CountUsers() (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.users), nil
+}
+
+func (m *Memory) UpdateUserEmail(orgID, userID, email string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return ErrNotFound
+	}
+	mem := m.memberships[userID]
+	if mem == nil || mem.OrgID != orgID {
+		return ErrNotFound
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	if existing, taken := m.usersByMail[email]; taken && existing != userID {
+		return ErrAlreadyExists
+	}
+	if u.Email != "" {
+		delete(m.usersByMail, strings.ToLower(u.Email))
+	}
+	u.Email = email
+	m.usersByMail[email] = userID
+	return nil
+}
+
+func (m *Memory) UpdateUserPassword(orgID, userID, passwordHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return ErrNotFound
+	}
+	mem := m.memberships[userID]
+	if mem == nil || mem.OrgID != orgID {
+		return ErrNotFound
+	}
+	u.PasswordHash = passwordHash
+	return nil
+}
+
 func (m *Memory) CreateSession(s *model.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -178,6 +222,17 @@ func (m *Memory) DeleteSession(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, id)
+	return nil
+}
+
+func (m *Memory) DeleteSessionsForUser(userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, s := range m.sessions {
+		if s.UserID == userID {
+			delete(m.sessions, id)
+		}
+	}
 	return nil
 }
 

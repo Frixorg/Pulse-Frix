@@ -33,6 +33,11 @@ type Server struct {
 	enrollLimiter *Limiter
 	ingestLimiter *Limiter
 	sshLimiter    *Limiter
+	setupLimiter  *Limiter
+
+	// setupMu serialises first-boot provisioning so two concurrent wizards
+	// cannot both observe an empty user table.
+	setupMu sync.Mutex
 
 	alerts *alertEngine
 
@@ -69,6 +74,7 @@ func New(cfg *config.Config, st store.Store, logger *slog.Logger) *Server {
 		enrollLimiter: NewLimiter(0.1, 3),  // strict on enrollment
 		ingestLimiter: NewLimiter(50, 100), // agent ingestion (per IP)
 		sshLimiter:    NewLimiter(0.2, 5),  // console dials: ~5 then 1 / 5s
+		setupLimiter:  NewLimiter(0.1, 5),  // first-boot provisioning attempts
 		alerts:        newAlertEngine(),
 	}
 }
@@ -85,6 +91,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/auth/login", s.loginLimiter.Middleware()(http.HandlerFunc(s.handleLogin)))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/session", s.handleSession)
+
+	// First-boot provisioning. Public by necessity, and closed for good once an
+	// account exists (see handlers_setup.go).
+	mux.HandleFunc("GET /api/v1/setup/status", s.handleSetupStatus)
+	mux.Handle("POST /api/v1/setup", s.setupLimiter.Middleware()(http.HandlerFunc(s.handleSetupComplete)))
+
+	// Account self-service. Any signed-in role manages its own credentials.
+	mux.Handle("POST /api/v1/account/email",
+		s.loginLimiter.Middleware()(s.requireAuth(s.handleChangeEmail)))
+	mux.Handle("POST /api/v1/account/password",
+		s.loginLimiter.Middleware()(s.requireAuth(s.handleChangePassword)))
 
 	// OIDC (Google, Telegram, ...) — public browser redirects.
 	mux.HandleFunc("GET /api/v1/auth/providers", s.handleAuthProviders)
@@ -105,6 +122,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/servers/{id}/databases", s.requirePerm(rbac.ServerRead, s.handleDatabases))
 	mux.HandleFunc("GET /api/v1/servers/{id}/applications", s.requirePerm(rbac.ServerRead, s.handleApplications))
 	mux.HandleFunc("GET /api/v1/servers/{id}/domains", s.requirePerm(rbac.ServerRead, s.handleDomains))
+	// Unified host-vs-container inventory, correlated from the same snapshot.
+	mux.HandleFunc("GET /api/v1/servers/{id}/inventory", s.requirePerm(rbac.ServerRead, s.handleInventory))
 	mux.HandleFunc("GET /api/v1/servers/{id}/security", s.requirePerm(rbac.ServerRead, s.handleSecurity))
 	mux.HandleFunc("POST /api/v1/servers/{id}/security/scan", s.requirePerm(rbac.ServerRead, s.handleSecurityScanStart))
 	mux.HandleFunc("GET /api/v1/servers/{id}/security/scan/{scanId}", s.requirePerm(rbac.ServerRead, s.handleSecurityScanGet))
@@ -183,6 +202,19 @@ func (s *Server) requirePerm(p rbac.Permission, h http.HandlerFunc) http.Handler
 		}
 		if !rbac.Can(principal.Role, p) {
 			Fail(w, r, http.StatusForbidden, CodePermission, "insufficient permissions")
+			return
+		}
+		h(w, r)
+	}
+}
+
+// requireAuth wraps a handler that any authenticated caller may reach,
+// regardless of role — used for endpoints that act on the caller's OWN account
+// rather than on tenant resources.
+func (s *Server) requireAuth(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.FromContext(r.Context()); !ok {
+			Fail(w, r, http.StatusUnauthorized, CodeAuth, "authentication required")
 			return
 		}
 		h(w, r)

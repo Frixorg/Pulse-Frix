@@ -26,7 +26,9 @@ var nginxDirs = []string{
 }
 
 func (NginxDetector) Available(context.Context) model.Availability {
-	if fileExists("/etc/nginx/nginx.conf") {
+	// Config is read under the host rootfs, so a containerised agent with
+	// /:/host:ro still sees the operator's real nginx.
+	if hostFileExists("/etc/nginx/nginx.conf") {
 		return model.Availability{Available: true}
 	}
 	if _, ok := lookPath("nginx"); ok {
@@ -38,8 +40,7 @@ func (NginxDetector) Available(context.Context) model.Availability {
 func (NginxDetector) Detect(context.Context) ([]model.Resource, error) {
 	files := map[string]bool{}
 	for _, dir := range nginxDirs {
-		matches, _ := filepath.Glob(filepath.Join(dir, "*"))
-		for _, m := range matches {
+		for _, m := range hostGlob(filepath.Join(dir, "*")) {
 			files[m] = true
 		}
 	}
@@ -53,7 +54,7 @@ func (NginxDetector) Detect(context.Context) ([]model.Resource, error) {
 			}
 			seen[vh.ServerName] = true
 			attrs := map[string]any{
-				"config_file": file,
+				"config_file": displayPath(file),
 				"listen":      vh.Listen,
 				"ssl":         vh.SSL,
 			}

@@ -261,9 +261,17 @@ ENABLE_AUTO_TLS=false
 ENABLE_REMOTE_ACTIONS=false
 ENABLE_AUTO_UPDATE=false
 # --- bootstrap (first-run) ---
+# Because these are set, the owner is seeded at start-up and the /setup wizard
+# never opens. Clear both (and restart pulse-api) to provision in the browser
+# instead. PULSE_BOOTSTRAP_* are the older names for the same two values.
+ADMIN_EMAIL=$ADMIN_EMAIL
+ADMIN_PASSWORD=$ADMIN_PASSWORD
 PULSE_BOOTSTRAP_EMAIL=$ADMIN_EMAIL
 PULSE_BOOTSTRAP_PASSWORD=$ADMIN_PASSWORD
 PULSE_BOOTSTRAP_ENROLLMENT_TOKEN=$local_enroll
+# --- dashboard build: self-hosted drops the marketing landing page ---
+IS_SELF_HOSTED=true
+APP_MODE=self_hosted
 # --- agent ---
 AGENT_MODE=$agent_mode
 AGENT_ENROLLMENT_TOKEN=$local_enroll

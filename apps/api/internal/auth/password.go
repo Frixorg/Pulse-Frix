@@ -90,3 +90,83 @@ func pbkdf2SHA256(password, salt []byte, iter, keyLen int) []byte {
 	}
 	return dk[:keyLen]
 }
+
+// MinPasswordLength is the floor enforced on every password Pulse accepts from
+// a human (first-boot provisioning, password changes). It is deliberately
+// higher than HashPassword's hard minimum, which only guards the primitive.
+const MinPasswordLength = 12
+
+// maxPasswordLength bounds the input so a huge body can't be turned into work.
+const maxPasswordLength = 256
+
+// weakPasswords are rejected outright regardless of length. This is a tripwire
+// for the handful of values that actually show up on fresh installs, not a
+// substitute for a real breached-password list.
+var weakPasswords = map[string]bool{
+	"password":      true,
+	"password123":   true,
+	"passw0rd123":   true,
+	"changeme":      true,
+	"changeme123":   true,
+	"administrator": true,
+	"adminadmin":    true,
+	"pulsepulse":    true,
+	"letmein12345":  true,
+	"123456789012":  true,
+	"qwertyuiop12":  true,
+}
+
+// ValidatePasswordPolicy checks a human-chosen password before it is hashed.
+// The error text is safe to return to the caller: it never echoes the password.
+// email may be empty.
+func ValidatePasswordPolicy(password, email string) error {
+	if len(password) < MinPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
+	}
+	if len(password) > maxPasswordLength {
+		return fmt.Errorf("password must be at most %d characters", maxPasswordLength)
+	}
+	lower := strings.ToLower(password)
+	if weakPasswords[lower] {
+		return errors.New("password is too common")
+	}
+	if email != "" {
+		e := strings.ToLower(strings.TrimSpace(email))
+		if lower == e {
+			return errors.New("password must not be your email address")
+		}
+		if local, _, ok := strings.Cut(e, "@"); ok && local != "" && lower == local {
+			return errors.New("password must not be your email address")
+		}
+	}
+	return nil
+}
+
+// ValidateEmail applies a deliberately small sanity check: one "@", something
+// on both sides, a dot in the domain, no whitespace, bounded length. Pulse
+// never sends mail, so anything stricter would only reject valid operators.
+func ValidateEmail(email string) error {
+	e := strings.TrimSpace(email)
+	if e == "" {
+		return errors.New("email is required")
+	}
+	if len(e) > 254 {
+		return errors.New("email is too long")
+	}
+	if strings.ContainsAny(e, " \t\r\n") {
+		return errors.New("email must not contain whitespace")
+	}
+	local, domain, ok := strings.Cut(e, "@")
+	if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
+		return errors.New("email is not valid")
+	}
+	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return errors.New("email is not valid")
+	}
+	return nil
+}
+
+// NormalizeEmail lowercases and trims an address for storage and lookup.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}

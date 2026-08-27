@@ -50,7 +50,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(SessionCookie); err == nil {
 		_ = s.store.DeleteSession(auth.HashToken(c.Value))
 	}
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+	clearSessionCookie(w)
 	JSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 

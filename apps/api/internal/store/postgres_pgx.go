@@ -175,6 +175,45 @@ func (p *Postgres) GetUser(orgID, userID string) (*model.User, error) {
 	return u, err
 }
 
+func (p *Postgres) CountUsers() (int, error) {
+	var n int
+	err := p.db.QueryRow(`SELECT count(*) FROM users`).Scan(&n)
+	return n, err
+}
+
+func (p *Postgres) UpdateUserEmail(orgID, userID, email string) error {
+	// The membership join keeps the update inside the caller's tenant.
+	res, err := p.db.Exec(`
+		UPDATE users SET email=$1
+		WHERE id=$2 AND EXISTS (SELECT 1 FROM memberships m WHERE m.user_id=$2 AND m.org_id=$3)`,
+		strings.ToLower(strings.TrimSpace(email)), userID, orgID)
+	if err != nil {
+		// users.email is UNIQUE; a collision is a caller error, not a 500.
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate key") {
+			return ErrAlreadyExists
+		}
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) UpdateUserPassword(orgID, userID, passwordHash string) error {
+	res, err := p.db.Exec(`
+		UPDATE users SET password_hash=$1
+		WHERE id=$2 AND EXISTS (SELECT 1 FROM memberships m WHERE m.user_id=$2 AND m.org_id=$3)`,
+		passwordHash, userID, orgID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (p *Postgres) CreateSession(s *model.Session) error {
 	_, err := p.db.Exec(`INSERT INTO sessions(id,user_id,org_id,csrf_secret,expires_at) VALUES($1,$2,$3,$4,$5)`,
 		s.ID, s.UserID, s.OrgID, s.CSRFSecret, s.ExpiresAt)
@@ -193,6 +232,11 @@ func (p *Postgres) GetSession(id string) (*model.Session, error) {
 
 func (p *Postgres) DeleteSession(id string) error {
 	_, err := p.db.Exec(`DELETE FROM sessions WHERE id=$1`, id)
+	return err
+}
+
+func (p *Postgres) DeleteSessionsForUser(userID string) error {
+	_, err := p.db.Exec(`DELETE FROM sessions WHERE user_id=$1`, userID)
 	return err
 }
 

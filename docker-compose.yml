@@ -58,9 +58,16 @@ services:
       PULSE_SESSION_SECRET: ${PULSE_SESSION_SECRET:-}
       PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:-}
       PULSE_CORS_ORIGINS: ${PULSE_CORS_ORIGINS:-}
+      # Initial administrator. Leave BOTH unset to provision interactively at
+      # /setup on first boot instead. PULSE_BOOTSTRAP_* are the older names and
+      # still work.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
       PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
       PULSE_BOOTSTRAP_ENROLLMENT_TOKEN: ${PULSE_BOOTSTRAP_ENROLLMENT_TOKEN:-}
+      # Set to false to require ADMIN_EMAIL/ADMIN_PASSWORD and remove /setup.
+      PULSE_SETUP_WIZARD: ${PULSE_SETUP_WIZARD:-true}
       # Browser SSH console (docs/SSH_CONSOLE.md). On by default; set
       # PULSE_SSH_CONSOLE=false in your .env to remove the terminal.
       PULSE_SSH_CONSOLE: ${PULSE_SSH_CONSOLE:-true}
@@ -73,6 +80,12 @@ services:
   pulse-dashboard:
     build:
       context: ./apps/dashboard
+      # This compose IS the self-hosted stack, so the SPA is built without the
+      # marketing landing: "/" goes straight to /app (see vite.config.ts).
+      args:
+        IS_SELF_HOSTED: ${IS_SELF_HOSTED:-true}
+        APP_MODE: ${APP_MODE:-self_hosted}
+        PULSE_MODE: ${PULSE_MODE:-local}
     container_name: pulse-dashboard
     restart: unless-stopped
     ports:
@@ -93,11 +106,20 @@ services:
       PULSE_API_URL: http://pulse-api:8080
       PULSE_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-}
       PULSE_DATA_DIR: /data
+      # Read host files (nginx/apache/caddy vhosts, TLS certs, disk usage)
+      # under this prefix. Nothing is ever written back.
+      PULSE_ROOTFS: /host
+    # Host PID namespace: without it the agent sees only its own process and
+    # socket tables, so host services and ports come back empty. It grants no
+    # write capability — the agent still only reads /proc.
+    pid: host
     volumes:
       # READ-ONLY Docker socket for container discovery (root-equivalent — see
       # SECURITY.md). Prefer a read-only socket proxy in hardened deployments.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - pulse-agent-data:/data
+      # READ-ONLY host visibility for accurate discovery. Nothing is written.
+      - /:/host:ro,rslave
     depends_on: [pulse-api]
     networks: [pulse-net]
     mem_limit: 128m

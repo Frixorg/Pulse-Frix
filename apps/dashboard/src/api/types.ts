@@ -10,6 +10,14 @@ export interface SessionInfo {
   permissions: string[];
 }
 
+/** First-boot provisioning state reported by GET /setup/status. */
+export interface SetupStatus {
+  needs_setup: boolean;
+  mode: string;
+  self_hosted: boolean;
+  min_password_length: number;
+}
+
 export interface Server {
   id: string;
   org_id: string;
@@ -71,6 +79,55 @@ export interface DomainView {
   ports?: string[];
   health: Health;
   source: string;
+}
+
+// --- Unified inventory ---
+// The correlated host-vs-container view of everything running on a server:
+// containers, host services, databases and reverse proxies, each with the
+// listening sockets attributed to it.
+
+export interface InventoryPort {
+  port: number;
+  protocol: string;
+  address?: string;
+  exposure?: string;
+}
+
+export type InventoryKind = "container" | "service" | "database" | "proxy";
+export type InventoryPlacement = "host" | "container";
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  kind: InventoryKind;
+  placement: InventoryPlacement;
+  status?: string;
+  health?: Health;
+  engine?: string;
+  image?: string;
+  unit?: string;
+  pid?: number;
+  container_id?: string;
+  ports?: InventoryPort[];
+  detected_by?: string;
+}
+
+export interface InventoryTotals {
+  host_workloads: number;
+  container_workloads: number;
+  listening_ports: number;
+  public_ports: number;
+  databases: number;
+  unattributed_ports: number;
+}
+
+export interface InventoryResponse {
+  hostname: string;
+  generated_at: string;
+  totals: InventoryTotals;
+  items: InventoryItem[];
+  /** Listening sockets whose owning process could not be read. */
+  unattributed: InventoryPort[];
 }
 
 export type FindingSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";

@@ -42,9 +42,23 @@ type Store interface {
 	// creates a new tenant (org + owner user). Email may be empty.
 	UpsertOIDCUser(provider, subject, email, name string) (*model.User, *model.Membership, error)
 
+	// CountUsers reports how many accounts exist across the whole control
+	// plane. It is deliberately NOT org-scoped: it answers exactly one
+	// question — "has this deployment been provisioned yet?" — which gates the
+	// first-boot setup endpoint.
+	CountUsers() (int, error)
+	// UpdateUserEmail and UpdateUserPassword change the caller's own
+	// credentials. Both are org-scoped so a session can only ever touch a user
+	// inside its own tenant.
+	UpdateUserEmail(orgID, userID, email string) error
+	UpdateUserPassword(orgID, userID, passwordHash string) error
+
 	CreateSession(s *model.Session) error
 	GetSession(id string) (*model.Session, error)
 	DeleteSession(id string) error
+	// DeleteSessionsForUser revokes every session a user holds. Called on
+	// password change so a stolen cookie dies with the old password.
+	DeleteSessionsForUser(userID string) error
 
 	// --- servers & agents ---
 	ListServers(orgID string) ([]model.Server, error)

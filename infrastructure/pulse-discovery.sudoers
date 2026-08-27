@@ -1,0 +1,66 @@
+# =============================================================================
+# OPTIONAL least-privilege sudoers drop-in for a HOST-INSTALLED Pulse agent
+# running as an unprivileged user.
+#
+#   Install:  sudo install -m 0440 -o root -g root \
+#               infrastructure/pulse-discovery.sudoers \
+#               /etc/sudoers.d/pulse-discovery
+#   Verify:   sudo visudo -c -f /etc/sudoers.d/pulse-discovery
+#   Remove:   sudo rm /etc/sudoers.d/pulse-discovery
+#
+# ---------------------------------------------------------------------------
+# READ THIS FIRST: you probably do not need this file.
+# ---------------------------------------------------------------------------
+#
+# Pulse discovery is built to need no privilege escalation at all. Everything
+# it reads comes from /proc, /sys, config files under /etc, and a read-only
+# Docker socket. The supported containerised deployment
+# (infrastructure/docker-compose.agent.yml) grants that visibility through
+# `pid: host` and a read-only `/:/host:ro` mount, and uses no sudo whatsoever.
+#
+# This file exists for one narrower case: an agent installed directly on the
+# host as an unprivileged user, where two things are otherwise invisible.
+#
+#   1. `systemctl list-units` — readable without sudo on almost every distro.
+#      Included only for hosts that have restricted the systemd D-Bus socket.
+#   2. /proc/<pid>/fd — needed to attribute a listening socket to the process
+#      that owns it. Without it, ports are still discovered; they are just
+#      reported as "unattributed" in the inventory. `ss -tulpn` is the
+#      read-only way to get that attribution.
+#
+# Everything below is:
+#   * an EXACT command with an EXACT argument vector — no wildcards, so no
+#     argument the agent supplies can change what runs;
+#   * strictly READ-ONLY — none of these commands can start, stop, install,
+#     write or reconfigure anything;
+#   * NOPASSWD, because a discovery daemon has no terminal to type into.
+#
+# Installing this file alone changes nothing. The agent only attempts `sudo -n`
+# when you also set PULSE_USE_SUDO=true in its environment, and it always tries
+# the command directly first — sudo is a fallback, never the default path.
+#
+# If you are not comfortable granting these, don't. Pulse degrades gracefully:
+# the affected detectors report what they can and say what they could not read.
+# =============================================================================
+
+# The unprivileged account the agent runs as. Change it to match your install.
+User_Alias PULSE_AGENT = pulse
+
+# --- Read-only service state -------------------------------------------------
+Cmnd_Alias PULSE_SYSTEMD = \
+    /usr/bin/systemctl list-units --type=service --state=running --no-legend --no-pager --plain, \
+    /usr/bin/systemctl list-units --type=service --state=failed --no-legend --no-pager --plain, \
+    /bin/systemctl list-units --type=service --state=running --no-legend --no-pager --plain, \
+    /bin/systemctl list-units --type=service --state=failed --no-legend --no-pager --plain
+
+# --- Read-only socket -> process attribution ---------------------------------
+Cmnd_Alias PULSE_SOCKETS = \
+    /usr/bin/ss -tulpnH, \
+    /usr/sbin/ss -tulpnH, \
+    /bin/ss -tulpnH
+
+PULSE_AGENT ALL=(root) NOPASSWD: PULSE_SYSTEMD, PULSE_SOCKETS
+
+# Never let these run under a shell wrapper or with an inherited environment.
+Defaults!PULSE_SYSTEMD  !set_logname, noexec
+Defaults!PULSE_SOCKETS  !set_logname, noexec

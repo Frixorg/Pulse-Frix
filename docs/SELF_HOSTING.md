@@ -35,6 +35,47 @@ explicit confirmation, generates a *previewed, validated, backed-up, reversible*
 server block — it never overwrites your Nginx config. Automatic TLS is gated behind
 `ENABLE_AUTO_TLS=false` by default.
 
+## Signing in for the first time
+
+A self-hosted deployment has no marketing site: `/` goes straight to `/app`,
+which the router resolves to the dashboard when you are signed in and to
+`/login` when you are not. The landing-page chunks are not even built into the
+image — the SPA is compiled with `IS_SELF_HOSTED=true` (equivalently
+`APP_MODE=self_hosted`, or the `PULSE_MODE=local` this stack already sets), and
+Vite drops the marketing branch and its dynamic imports at build time.
+
+There are two ways to create the administrator account; pick one.
+
+**Environment (the installer's path).** Set both in `.env` before the first
+start:
+
+```bash
+ADMIN_EMAIL=you@example.com
+ADMIN_PASSWORD=<at least 12 characters>
+```
+
+The owner is seeded on start-up and `/setup` never opens. A weak or too-short
+password is refused with a clear log line rather than silently accepted.
+`PULSE_BOOTSTRAP_EMAIL` / `PULSE_BOOTSTRAP_PASSWORD` still work as the older
+names for the same thing.
+
+**Onboarding wizard.** Leave both unset and open the dashboard: the first boot
+lands on `/setup`, where you create the account in the browser and are signed in
+immediately. The endpoint closes permanently once any account exists, so it can
+never be used to add a second owner. Set `PULSE_SETUP_WIZARD=false` to remove it
+and require the environment variables.
+
+Either way the password is hashed with PBKDF2-HMAC-SHA256 (210,000 iterations,
+per-password salt) and never logged.
+
+## Changing your email or password
+
+**Settings → Security**, inside the dashboard. Both forms require your current
+password, so a hijacked session alone cannot lock you out. Changing the password
+also revokes **every** session the account holds — any other signed-in browser
+is signed out — while the browser that made the change gets a fresh cookie in
+the same response. Both changes are written to the audit log.
+
 ## After install
 
 ```bash

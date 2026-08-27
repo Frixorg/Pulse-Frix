@@ -50,6 +50,33 @@ The path is versioned (`/api/v1`). Breaking changes bump the version.
 | GET | `/auth/session` | current principal + permissions |
 | POST | `/auth/mfa/verify` | MFA-ready (TOTP) |
 
+### First-boot provisioning — `/api/v1/setup`
+
+Public by necessity, and closed permanently once any account exists. Used only
+when `ADMIN_EMAIL`/`ADMIN_PASSWORD` were not supplied to the installer, and
+only in self-hosted mode — cloud is multi-tenant and provisions through an
+identity provider, so the wizard is never offered there.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/setup/status` | `{needs_setup, mode, self_hosted, min_password_length}` |
+| POST | `/setup` | creates the first owner and signs it in; 409 once provisioned; rate-limited |
+
+### Account self-service — `/api/v1/account`
+
+Any authenticated role manages its OWN credentials; these are not admin
+capabilities. Both endpoints re-verify the current password, so a hijacked
+session alone cannot change them.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| POST | `/account/email` | `{current_password, email}` → updated session payload |
+| POST | `/account/password` | `{current_password, new_password}`; revokes every session the user holds and issues a fresh cookie to this browser |
+
+Passwords are hashed with PBKDF2-HMAC-SHA256 (210,000 iterations, 16-byte
+per-password salt) and must be at least 12 characters. Changes are audited as
+`account.email_change` / `account.password_change`.
+
 ### Users & orgs — `/api/v1/users`, `/api/v1/organizations`
 
 CRUD scoped to the caller's org; `user.manage` / `org.manage` required for writes.
@@ -88,6 +115,21 @@ CRUD scoped to the caller's org; `user.manage` / `org.manage` required for write
 | GET | `/servers/{id}/containers/{cid}` (metrics, mounts, networks, ports, **redacted** env, health) |
 | GET | `/servers/{id}/applications` |
 | GET | `/servers/{id}/databases` |
+| GET | `/servers/{id}/inventory` |
+
+#### Inventory
+
+`GET /servers/{id}/inventory` is the correlated answer to "what is running on
+this box, and is it on the host or in a container?". It is derived server-side
+from the same snapshot, so the dashboard needs one request.
+
+Each item carries `kind` (`container` | `service` | `database` | `proxy`) and
+`placement` (`host` | `container`), with every listening socket attached to
+whatever owns it — a container id, a systemd unit, or a bare PID.
+
+Sockets whose owner could not be read come back under `unattributed` rather
+than being dropped: an unexplained open port is a finding, not an empty result.
+It usually means the agent could not read `/proc/<pid>/fd`.
 
 ### Domains — `/api/v1/domains`
 

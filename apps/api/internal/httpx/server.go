@@ -124,6 +124,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/servers/{id}/domains", s.requirePerm(rbac.ServerRead, s.handleDomains))
 	// Unified host-vs-container inventory, correlated from the same snapshot.
 	mux.HandleFunc("GET /api/v1/servers/{id}/inventory", s.requirePerm(rbac.ServerRead, s.handleInventory))
+	// Service relationships plus advisory findings about what nothing needs.
+	// Read-only and non-destructive, like everything else here: it flags, it
+	// never proposes or performs a removal.
+	mux.HandleFunc("GET /api/v1/servers/{id}/service-audit", s.requirePerm(rbac.ServerRead, s.handleServiceAudit))
 	mux.HandleFunc("GET /api/v1/servers/{id}/security", s.requirePerm(rbac.ServerRead, s.handleSecurity))
 	mux.HandleFunc("POST /api/v1/servers/{id}/security/scan", s.requirePerm(rbac.ServerRead, s.handleSecurityScanStart))
 	mux.HandleFunc("GET /api/v1/servers/{id}/security/scan/{scanId}", s.requirePerm(rbac.ServerRead, s.handleSecurityScanGet))

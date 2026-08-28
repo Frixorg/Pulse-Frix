@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,6 +158,10 @@ func (d *DockerStorageDetector) Detect(ctx context.Context) ([]model.Resource, e
 			"total_bytes":    nonNeg(df.LayersSize) + totalWritable + totalVolume,
 		},
 	})
+	// Per-container writable-layer sizes, so disk can be attributed to a single
+	// workload rather than only to its project. Bounded and sorted largest
+	// first: the small tail is noise nobody would act on.
+	out = append(out, containerStorage(df, now)...)
 	for _, a := range groups {
 		out = append(out, model.Resource{
 			Type:       "storage_group",
@@ -183,4 +188,59 @@ func (d *DockerStorageDetector) Detect(ctx context.Context) ([]model.Resource, e
 
 func (*DockerStorageDetector) Health(context.Context) model.HealthReport {
 	return model.HealthReport{Status: model.StatusHealthy}
+}
+
+// maxContainerStorageRows bounds how many per-container rows a snapshot carries.
+const maxContainerStorageRows = 50
+
+// containerStorage emits one row per container with a measurable writable
+// layer, keyed by container name so the service audit can attribute disk to a
+// specific workload. Containers with nothing written are skipped.
+func containerStorage(df systemDFResp, now time.Time) []model.Resource {
+	type row struct {
+		name     string
+		image    string
+		writable int64
+		rootfs   int64
+	}
+	rows := make([]row, 0, len(df.Containers))
+	for _, ct := range df.Containers {
+		if len(ct.Names) == 0 {
+			continue
+		}
+		writable := nonNeg(ct.SizeRw)
+		if writable == 0 {
+			continue
+		}
+		// Docker returns names with a leading slash.
+		rows = append(rows, row{
+			name:     strings.TrimPrefix(ct.Names[0], "/"),
+			image:    ct.Image,
+			writable: writable,
+			rootfs:   nonNeg(ct.SizeRootFs),
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].writable > rows[j].writable })
+	if len(rows) > maxContainerStorageRows {
+		rows = rows[:maxContainerStorageRows]
+	}
+
+	out := make([]model.Resource, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, model.Resource{
+			Type:       "container_storage",
+			ID:         "container_storage:" + r.name,
+			Name:       r.name,
+			Health:     model.StatusHealthy,
+			DetectedBy: "docker_storage",
+			DetectedAt: now,
+			Attributes: map[string]any{
+				"container":      r.name,
+				"image":          r.image,
+				"writable_bytes": r.writable,
+				"rootfs_bytes":   r.rootfs,
+			},
+		})
+	}
+	return out
 }

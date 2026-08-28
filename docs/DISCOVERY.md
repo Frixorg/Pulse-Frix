@@ -189,6 +189,30 @@ correlates the snapshot into a single host-vs-container workload list at
 
 ---
 
+## Service relationships and unused workloads
+
+`GET /servers/{id}/service-audit` goes one step further: it derives which
+services are connected to which, and flags the ones nothing appears to need.
+
+The relationship graph uses only evidence the snapshot already contains — a
+reverse-proxy upstream resolved to the container publishing that port, a shared
+user-defined Docker network, a Compose project or `depends_on`, a socket
+attributed to a process. Same rule as the topology graph: **no edge without
+evidence**.
+
+The "unused" half is explicitly heuristic. A stopped container holding disk is a
+fact; "nothing routes here" is a lead. So every finding ships the observations
+behind it, a confidence, and a reclaimable estimate, and the response states its
+own blind spots — a single CPU sample, cumulative container counters, and
+traffic over channels Pulse cannot see. Core infrastructure and the Pulse stack
+itself are exempt from every rule.
+
+Nothing in this path proposes or performs a change. It flags; the operator
+decides. See [API.md](./API.md#service-audit) for the rule table and
+[SAFETY_MODEL.md](./SAFETY_MODEL.md) for why it stops there.
+
+---
+
 ## Topology & dependencies
 
 The engine derives an infrastructure graph from **real** discovery data — Nginx

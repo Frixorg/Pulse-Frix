@@ -74,7 +74,7 @@ func (s *Server) handleChangeEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit.Record(p.OrgID, p.Email, "account.email_change", "success", clientIP(r),
 		map[string]any{"new_email": email})
-	JSON(w, http.StatusOK, sessionPayload(email, p.Role))
+	JSON(w, http.StatusOK, sessionPayload(email, p.Role, true))
 }
 
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -124,5 +124,5 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit.Record(p.OrgID, p.Email, "account.password_change", "success", clientIP(r), nil)
-	JSON(w, http.StatusOK, sessionPayload(p.Email, p.Role))
+	JSON(w, http.StatusOK, sessionPayload(p.Email, p.Role, true))
 }

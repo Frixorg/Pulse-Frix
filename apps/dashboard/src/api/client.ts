@@ -9,6 +9,7 @@ import type {
   Resource,
   DomainView,
   InventoryResponse,
+  ServiceAuditResponse,
   SecurityAudit,
   ScanState,
   ScanMode,
@@ -126,6 +127,7 @@ export const api = {
   applications: (id: string) => request<Page<Resource>>(`/servers/${id}/applications`),
   domains: (id: string) => request<Page<DomainView>>(`/servers/${id}/domains`),
   inventory: (id: string) => request<InventoryResponse>(`/servers/${id}/inventory`),
+  serviceAudit: (id: string) => request<ServiceAuditResponse>(`/servers/${id}/service-audit`),
   security: (id: string) => request<SecurityAudit>(`/servers/${id}/security`),
   startSecurityScan: (id: string, body: { mode?: ScanMode; categories?: string[] }) =>
     request<{ scan_id: string }>(`/servers/${id}/security/scan`, { method: "POST", body: JSON.stringify(body) }),

@@ -47,6 +47,7 @@ const routes: RouteRecordRaw[] = [
       { path: "storage", name: "storage", component: () => import("@/views/StorageView.vue") },
       { path: "databases", name: "databases", component: () => import("@/views/DatabasesView.vue") },
       { path: "inventory", name: "inventory", component: () => import("@/views/InventoryView.vue") },
+      { path: "service-audit", name: "service-audit", component: () => import("@/views/ServiceAuditView.vue") },
       { path: "logs", name: "logs", component: () => import("@/views/LogsView.vue") },
       { path: "ssh", name: "ssh", component: () => import("@/views/SshView.vue") },
       { path: "alerts", name: "alerts", component: () => import("@/views/AlertsView.vue") },

@@ -60,6 +60,8 @@ The one exception is the opt-in **[SSH console](./docs/SSH_CONSOLE.md)**, where 
 | **Databases** | Postgres, MySQL/MariaDB, Redis, Mongo, and more — detected by port **and container image** |
 | **Network** | Throughput chart, totals, primary interface, per-interface counters (noise filtered) |
 | **Storage** | Capacity donut, used/free, per-filesystem usage bars and inodes |
+| **Inventory** | Everything running on the box in one list — host services and containers side by side, with every listening port attributed to the process, unit or container that owns it. Sockets nobody could be found for are shown, not hidden |
+| **Service Audit** | What talks to what, and what nothing seems to need — proxy routes, shared networks and Compose links, plus flags for stopped containers still on disk, services nothing routes to, idle workloads and orphaned volumes. Every flag shows its evidence and its confidence, core infrastructure is exempt, and **nothing is ever removed** |
 | **Metrics** | CPU, memory, disk, network, load — **all at once**, live, drag-to-reorder, 1h→30d ranges, history |
 | **Logs** | Pick a container and **watch its logs live**; search, copy, and export — always escaped, never raw HTML |
 | **Alerts** | Define rules (metric threshold or container-down) with a for-duration + severity; live **pop-up** when one fires |

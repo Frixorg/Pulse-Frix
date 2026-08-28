@@ -14,6 +14,11 @@ type Principal struct {
 	OrgID  string
 	Email  string
 	Role   model.Role
+	// HasPassword is false for an identity-provider account that has never set
+	// one. The dashboard uses it to decide whether password management applies
+	// at all: on Pulse Cloud people sign in with Google or Telegram and have no
+	// password to change.
+	HasPassword bool
 }
 
 type ctxKey struct{}

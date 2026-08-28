@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/frix-me/pulse/api/internal/auth"
 	"github.com/frix-me/pulse/api/internal/config"
+	"github.com/frix-me/pulse/api/internal/model"
 	"github.com/frix-me/pulse/api/internal/store"
 )
 
@@ -304,5 +306,69 @@ func TestSeededOwnerPasswordIsHashed(t *testing.T) {
 	}
 	if !auth.VerifyPassword("supersecret123", user.PasswordHash) {
 		t.Error("the stored hash does not verify the password")
+	}
+}
+
+// The whole point of has_password: an identity-provider account must report
+// false so the dashboard hides credential management instead of showing forms
+// that could only ever fail.
+func TestSessionReportsWhetherTheAccountHasAPassword(t *testing.T) {
+	ts, st := newTestServer(t)
+	defer ts.Close()
+
+	// A password account says true.
+	client := jarClient(t)
+	signIn(t, ts, client)
+	resp, err := client.Get(ts.URL + "/api/v1/auth/session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withPassword struct {
+		HasPassword bool `json:"has_password"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&withPassword)
+	resp.Body.Close()
+	if !withPassword.HasPassword {
+		t.Error("an account created with a password should report has_password")
+	}
+
+	// An OIDC account — no password was ever set — says false.
+	user, mem, err := st.UpsertOIDCUser("google", "sub-123", "oidc@example.com", "OIDC User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _, err := auth.GenerateToken("pss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(&model.Session{
+		ID:        auth.HashToken(plain),
+		UserID:    user.ID,
+		OrgID:     mem.OrgID,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookie, Value: plain})
+	resp, err = (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oidc struct {
+		Email       string `json:"email"`
+		HasPassword bool   `json:"has_password"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&oidc)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the OIDC session should authenticate, got %d", resp.StatusCode)
+	}
+	if oidc.HasPassword {
+		t.Error("an identity-provider account must report has_password=false")
+	}
+	if oidc.Email != "oidc@example.com" {
+		t.Errorf("email: got %q", oidc.Email)
 	}
 }

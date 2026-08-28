@@ -43,7 +43,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit.Record(mem.OrgID, user.Email, "auth.login", "success", clientIP(r), nil)
-	JSON(w, http.StatusOK, sessionPayload(user.Email, mem.Role))
+	JSON(w, http.StatusOK, sessionPayload(user.Email, mem.Role, true))
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -60,5 +60,5 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusUnauthorized, CodeAuth, "not authenticated")
 		return
 	}
-	JSON(w, http.StatusOK, sessionPayload(p.Email, p.Role))
+	JSON(w, http.StatusOK, sessionPayload(p.Email, p.Role, p.HasPassword))
 }

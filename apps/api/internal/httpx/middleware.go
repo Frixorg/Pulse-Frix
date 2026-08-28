@@ -123,7 +123,13 @@ func Authenticate(st store.Store) Middleware {
 				if sess, err := st.GetSession(auth.HashToken(cookie.Value)); err == nil {
 					if u, err := st.GetUser(sess.OrgID, sess.UserID); err == nil {
 						mem, _ := st.GetMembership(sess.OrgID, sess.UserID)
-						p := &auth.Principal{UserID: u.ID, OrgID: sess.OrgID, Email: u.Email, Role: roleOf(mem)}
+						p := &auth.Principal{
+						UserID:      u.ID,
+						OrgID:       sess.OrgID,
+						Email:       u.Email,
+						Role:        roleOf(mem),
+						HasPassword: u.PasswordHash != "",
+					}
 						r = r.WithContext(auth.WithPrincipal(r.Context(), p))
 					}
 				}

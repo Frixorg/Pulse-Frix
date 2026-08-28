@@ -47,7 +47,7 @@ The path is versioned (`/api/v1`). Breaking changes bump the version.
 |--------|------|-------|
 | POST | `/auth/login` | email+password → session; login rate-limited |
 | POST | `/auth/logout` | invalidate session |
-| GET | `/auth/session` | current principal + permissions |
+| GET | `/auth/session` | current principal + permissions + `has_password` |
 | POST | `/auth/mfa/verify` | MFA-ready (TOTP) |
 
 ### First-boot provisioning — `/api/v1/setup`
@@ -67,6 +67,12 @@ identity provider, so the wizard is never offered there.
 Any authenticated role manages its OWN credentials; these are not admin
 capabilities. Both endpoints re-verify the current password, so a hijacked
 session alone cannot change them.
+
+They apply only to accounts that HAVE a password. An identity-provider account —
+the normal case on Pulse Cloud, where people sign in with Google or Telegram —
+has nothing to verify against, so both endpoints return `409` and the dashboard
+hides the forms entirely. `has_password` on the session payload is what it keys
+on, so a self-hosted password account still gets them.
 
 | Method | Path | Notes |
 |--------|------|-------|
@@ -116,6 +122,35 @@ CRUD scoped to the caller's org; `user.manage` / `org.manage` required for write
 | GET | `/servers/{id}/applications` |
 | GET | `/servers/{id}/databases` |
 | GET | `/servers/{id}/inventory` |
+| GET | `/servers/{id}/service-audit` |
+
+#### Service audit
+
+`GET /servers/{id}/service-audit` answers "what talks to what, and what is
+running that nothing needs?".
+
+The `relations` graph is built only from evidence already in the snapshot — a
+reverse-proxy upstream, a shared user-defined Docker network, a Compose project
+or `depends_on`, a socket attributed to a process. It never invents an edge.
+
+`findings` are HEURISTICS and are presented as such. Each carries the `evidence`
+behind it, a `confidence`, and a `reclaimable` estimate; the response also ships
+its own blind spots in `limitations`, because acting on a finding means removing
+something from a live server.
+
+| Category | Fires when | Confidence |
+|----------|-----------|------------|
+| `stopped` | a container is not running but still holds its writable layer | high — "not running" is a fact |
+| `unrouted` | running and listening, but no proxy route and no connected peer | medium; suppressed entirely on hosts with no reverse proxy |
+| `idle` | near-zero CPU and almost no traffic since start, while holding memory | low, or medium when also unconnected |
+| `unreferenced` | a database engine with no observed consumer | low — clients connect over sockets Pulse does not trace |
+| `duplicate` | more than one instance of the same engine | medium |
+| `orphaned` | Docker volumes whose project has no containers left | medium |
+
+Core infrastructure (`sshd`, `systemd-*`, `docker`, the reverse proxy in use,
+and every `pulse-*` component) is exempt from every rule, whatever the numbers
+say. Nothing here proposes or performs a change — Pulse flags, the operator
+decides. See [SAFETY_MODEL.md](./SAFETY_MODEL.md).
 
 #### Inventory
 

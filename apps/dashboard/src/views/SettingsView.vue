@@ -28,8 +28,15 @@ async function generateToken() {
 // Both forms re-verify the current password server-side. Changing the password
 // also rotates every session the account holds, so any other signed-in browser
 // is signed out; this one gets a fresh cookie in the same response.
+//
+// They are shown only for accounts that HAVE a password. On Pulse Cloud people
+// sign in with Google or Telegram and have none, so there is nothing here to
+// verify against and nothing to change — those accounts get a pointer to the
+// provider instead of a form that could only ever fail.
 
 const MIN_PASSWORD = 12;
+
+const hasPassword = computed(() => auth.session?.has_password ?? false);
 
 const emailForm = ref({ email: "", current: "" });
 const emailBusy = ref(false);
@@ -120,8 +127,18 @@ async function changePassword() {
         <pre v-if="token" class="bg-surface-2 border border-border rounded-md p-3 text-xs mt-2 overflow-x-auto">./installer/install.sh --mode cloud --enrollment-token {{ token }}</pre>
       </div>
 
+      <!-- Identity-provider account: nothing here to manage locally. -->
+      <div v-if="!hasPassword" class="card">
+        <div class="card-title">Security</div>
+        <p class="text-sm text-muted">
+          You sign in through an identity provider, so this account has no Pulse password. Your
+          email address and password are managed with that provider — changing them there changes
+          how you sign in here.
+        </p>
+      </div>
+
       <!-- Security: the address this account signs in with. -->
-      <div class="card">
+      <div v-if="hasPassword" class="card">
         <div class="card-title">Security · Email</div>
         <p class="text-sm text-muted mb-3">
           The address you sign in with. Your current password confirms the change.
@@ -154,7 +171,7 @@ async function changePassword() {
       </div>
 
       <!-- Security: password rotation. -->
-      <div class="card">
+      <div v-if="hasPassword" class="card">
         <div class="card-title">Security · Password</div>
         <p class="text-sm text-muted mb-3">
           At least {{ MIN_PASSWORD }} characters. Changing it signs out every other session.

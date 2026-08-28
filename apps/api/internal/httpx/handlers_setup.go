@@ -120,5 +120,5 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit.Record(org.ID, email, "setup.complete", "success", clientIP(r), nil)
 	s.logger.Info("setup: administrator provisioned via wizard", "email", email)
-	JSON(w, http.StatusCreated, sessionPayload(email, model.RoleOwner))
+	JSON(w, http.StatusCreated, sessionPayload(email, model.RoleOwner, true))
 }

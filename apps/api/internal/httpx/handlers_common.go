@@ -22,16 +22,22 @@ func newSession(orgID, userID string, ttl time.Duration) *model.Session {
 }
 
 // sessionPayload is the shape returned by /auth/login and /auth/session.
-func sessionPayload(email string, role model.Role) map[string]any {
+//
+// hasPassword tells the dashboard whether password management applies to this
+// account at all. It is false for identity-provider logins, which is the normal
+// case on Pulse Cloud — those people sign in with Google or Telegram and have
+// no Pulse password, so Settings must not offer to change one.
+func sessionPayload(email string, role model.Role, hasPassword bool) map[string]any {
 	perms := rbac.Permissions(role)
 	strs := make([]string, len(perms))
 	for i, p := range perms {
 		strs[i] = string(p)
 	}
 	return map[string]any{
-		"email":       email,
-		"role":        string(role),
-		"permissions": strs,
+		"email":        email,
+		"role":         string(role),
+		"permissions":  strs,
+		"has_password": hasPassword,
 	}
 }
 

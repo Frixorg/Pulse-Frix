@@ -8,6 +8,13 @@ export interface SessionInfo {
   email: string;
   role: Role;
   permissions: string[];
+  /**
+   * False for an identity-provider account that has never had a Pulse
+   * password — the normal case on Pulse Cloud, where people sign in with
+   * Google or Telegram. Password and email management does not apply to those
+   * accounts and is hidden rather than shown broken.
+   */
+  has_password: boolean;
 }
 
 /** First-boot provisioning state reported by GET /setup/status. */
@@ -128,6 +135,86 @@ export interface InventoryResponse {
   items: InventoryItem[];
   /** Listening sockets whose owning process could not be read. */
   unattributed: InventoryPort[];
+}
+
+// --- Service audit ---
+// Relationships between services, plus advisory findings about what nothing
+// appears to need. Every finding carries its evidence and a confidence, and the
+// response states its own blind spots — the analysis is a lead, not a verdict,
+// and Pulse never acts on it.
+
+export type AuditSeverity = "info" | "low" | "medium";
+export type AuditConfidence = "low" | "medium" | "high";
+export type AuditCategory = "stopped" | "unrouted" | "idle" | "unreferenced" | "duplicate" | "orphaned";
+export type RelationKind = "proxy_route" | "docker_network" | "compose" | "depends_on" | "port";
+
+export interface ServiceUsage {
+  cpu_percent: number;
+  memory_bytes: number;
+  disk_bytes: number;
+  net_rx_bytes: number;
+  net_tx_bytes: number;
+}
+
+export interface ServiceRelation {
+  from: string;
+  to: string;
+  kind: RelationKind;
+  detail?: string;
+}
+
+export interface ServiceNode {
+  id: string;
+  name: string;
+  kind: InventoryKind;
+  placement: InventoryPlacement;
+  status?: string;
+  health?: Health;
+  image?: string;
+  engine?: string;
+  project?: string;
+  ports?: number[];
+  public_ports?: number[];
+  usage: ServiceUsage;
+  inbound_routes?: string[];
+  peers?: string[];
+  /** Infrastructure that is exempt from every waste rule. */
+  essential: boolean;
+}
+
+export interface AuditFinding {
+  id: string;
+  subject: string;
+  subject_name: string;
+  category: AuditCategory;
+  severity: AuditSeverity;
+  confidence: AuditConfidence;
+  title: string;
+  detail: string;
+  evidence: string[];
+  reclaimable: ServiceUsage;
+  recommendation: string;
+}
+
+export interface AuditTotals {
+  services: number;
+  relations: number;
+  flagged: number;
+  reclaimable_memory_bytes: number;
+  reclaimable_disk_bytes: number;
+  unrouted_services: number;
+  stopped_with_disk: number;
+}
+
+export interface ServiceAuditResponse {
+  hostname: string;
+  generated_at: string;
+  nodes: ServiceNode[];
+  relations: ServiceRelation[];
+  findings: AuditFinding[];
+  totals: AuditTotals;
+  /** What this analysis cannot see. Read before acting on any finding. */
+  limitations: string[];
 }
 
 export type FindingSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";

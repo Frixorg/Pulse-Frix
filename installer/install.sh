@@ -260,6 +260,11 @@ ENABLE_CONFIG_MUTATION=false
 ENABLE_AUTO_TLS=false
 ENABLE_REMOTE_ACTIONS=false
 ENABLE_AUTO_UPDATE=false
+# --- persistence ---
+# The API is built with the PostgreSQL adapter so accounts, servers and agent
+# registrations survive a restart. Without it the control plane forgets every
+# agent on restart, and each one is refused at ingest from then on.
+API_TAGS=pgx
 # --- bootstrap (first-run) ---
 # Because these are set, the owner is seeded at start-up and the /setup wizard
 # never opens. Clear both (and restart pulse-api) to provision in the browser

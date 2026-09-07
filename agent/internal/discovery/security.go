@@ -47,59 +47,182 @@ var (
 	weakKexPatterns    = []string{"group1-", "group-exchange-sha1", "diffie-hellman-group1", "rsa1024", "gss-group1"}
 )
 
-// readSSHDConfig parses sshd_config (+ sshd_config.d/*.conf) for hardening posture.
-func readSSHDConfig(root string) *model.Resource {
-	paths := []string{filepath.Join(root, "/etc/ssh/sshd_config")}
-	extra, _ := filepath.Glob(filepath.Join(root, "/etc/ssh/sshd_config.d/*.conf"))
-	paths = append(paths, extra...)
+// sshdSetting is one effective sshd_config value together with the file that
+// supplied it. Naming the file is the whole diagnosis on a cloud image, where
+// the answer is almost never /etc/ssh/sshd_config itself.
+type sshdSetting struct {
+	value  string
+	source string
+}
 
-	found := false
-	permitRoot, passAuth, emptyPass := "", "", ""
-	var weakC, weakM, weakK []string
-	for _, p := range paths {
-		for _, raw := range readLines(p) {
-			line := strings.TrimSpace(raw)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
+// sshdConfig is the effective GLOBAL configuration, resolved the way sshd
+// resolves it.
+type sshdConfig struct {
+	settings map[string]sshdSetting
+	files    []string
+}
+
+// set records a keyword only if it has not been seen yet: first match wins.
+func (c *sshdConfig) set(keyword, value, source string) {
+	k := strings.ToLower(keyword)
+	if _, seen := c.settings[k]; seen {
+		return
+	}
+	c.settings[k] = sshdSetting{value: value, source: source}
+}
+
+func (c *sshdConfig) value(keyword string) string {
+	return c.settings[strings.ToLower(keyword)].value
+}
+
+func (c *sshdConfig) source(keyword string) string {
+	return c.settings[strings.ToLower(keyword)].source
+}
+
+// splitDirective separates a keyword from its argument. sshd accepts either
+// whitespace or an optional '=' between the two, so "PasswordAuthentication=no"
+// and "PasswordAuthentication no" are the same directive.
+func splitDirective(line string) (string, string) {
+	i := strings.IndexFunc(line, func(r rune) bool { return r == ' ' || r == '\t' || r == '=' })
+	if i < 0 {
+		return line, ""
+	}
+	return line[:i], strings.TrimSpace(strings.TrimLeft(line[i:], " \t="))
+}
+
+// includePaths expands one Include directive. A relative pattern resolves
+// against /etc/ssh, and each glob expands in lexical order — which is why
+// 00-hardening.conf is parsed before 99-tunnel-key.conf, and therefore wins.
+func includePaths(root, spec string) []string {
+	var out []string
+	for _, pattern := range strings.Fields(spec) {
+		pattern = strings.Trim(pattern, `"`)
+		if !strings.HasPrefix(pattern, "/") {
+			pattern = filepath.Join("/etc/ssh", pattern)
+		}
+		matches, _ := filepath.Glob(filepath.Join(root, pattern))
+		sort.Strings(matches)
+		out = append(out, matches...)
+	}
+	return out
+}
+
+// parseSSHD walks one config file in sshd's own order, following Include
+// directives at the point they appear. depth bounds the recursion.
+func parseSSHD(root, path string, depth int, cfg *sshdConfig) {
+	if depth > 8 {
+		return
+	}
+	lines := readLines(path)
+	if lines == nil {
+		return
+	}
+	cfg.files = append(cfg.files, displayPath(path))
+
+	// Everything after a Match header is conditional on the connection, so it
+	// is not part of the global posture. "Match all" returns to unconditional.
+	conditional := false
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		keyword, value := splitDirective(line)
+		switch strings.ToLower(keyword) {
+		case "match":
+			conditional = !strings.EqualFold(value, "all")
+			continue
+		case "include":
+			for _, inc := range includePaths(root, value) {
+				parseSSHD(root, inc, depth+1, cfg)
 			}
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				continue
-			}
-			found = true
-			val := strings.Join(fields[1:], " ")
-			switch strings.ToLower(fields[0]) {
-			case "permitrootlogin":
-				permitRoot = strings.ToLower(fields[1])
-			case "passwordauthentication":
-				passAuth = strings.ToLower(fields[1])
-			case "permitemptypasswords":
-				emptyPass = strings.ToLower(fields[1])
-			case "ciphers":
-				weakC = weakItems(val, weakCipherPatterns)
-			case "macs":
-				weakM = weakItems(val, weakMacPatterns)
-			case "kexalgorithms":
-				weakK = weakItems(val, weakKexPatterns)
-			}
+			continue
+		}
+		if conditional || value == "" {
+			continue
+		}
+		cfg.set(keyword, value, displayPath(path))
+	}
+}
+
+// firstField returns the leading token of a value, for single-argument keywords.
+func firstField(v string) string {
+	if f := strings.Fields(v); len(f) > 0 {
+		return f[0]
+	}
+	return ""
+}
+
+// passwordLoginAvailable reports whether sshd will offer password auth at all.
+// An unset PasswordAuthentication defaults to yes.
+func passwordLoginAvailable(passAuth string) bool { return passAuth != "no" }
+
+// rootPasswordLoginAvailable applies the second gate that catches people out.
+// Since OpenSSH 7.0 an unset PermitRootLogin defaults to prohibit-password, so
+// root gets no password prompt unless the host opted back in explicitly — the
+// daemon simply advertises publickey and disconnects.
+func rootPasswordLoginAvailable(passAuth, permitRoot string) bool {
+	return passwordLoginAvailable(passAuth) && permitRoot == "yes"
+}
+
+// readSSHDConfig resolves the EFFECTIVE sshd posture the way sshd does.
+//
+// Two rules decide the answer, and getting either wrong reports the opposite of
+// the truth:
+//
+//   - Include is expanded where it appears. Debian and Ubuntu images put
+//     "Include /etc/ssh/sshd_config.d/*.conf" at the TOP of sshd_config, so the
+//     drop-ins are parsed before anything written below them.
+//   - The FIRST value obtained for a keyword wins. Later ones are ignored.
+//
+// So a 00-hardening.conf that sets "PasswordAuthentication no" beats the
+// "PasswordAuthentication yes" further down sshd_config. Reading the main file
+// first, or letting the last match win, reports password logins as available on
+// a host that refuses them outright.
+func readSSHDConfig(root string) *model.Resource {
+	cfg := &sshdConfig{settings: map[string]sshdSetting{}}
+	parseSSHD(root, filepath.Join(root, "/etc/ssh/sshd_config"), 0, cfg)
+	// A host can be configured entirely from drop-ins, so look there even when
+	// the main file is missing and the include chain never ran.
+	if len(cfg.files) == 0 {
+		for _, p := range includePaths(root, "/etc/ssh/sshd_config.d/*.conf") {
+			parseSSHD(root, p, 1, cfg)
 		}
 	}
-	if !found {
+	if len(cfg.files) == 0 {
 		return nil
 	}
+
+	permitRoot := strings.ToLower(firstField(cfg.value("permitrootlogin")))
+	passAuth := strings.ToLower(firstField(cfg.value("passwordauthentication")))
+	emptyPass := strings.ToLower(firstField(cfg.value("permitemptypasswords")))
+
 	attrs := map[string]any{
 		"permit_root_login":       orElse(permitRoot, "default"),
 		"password_authentication": orElse(passAuth, "default"),
 		"permit_empty_passwords":  orElse(emptyPass, "no"),
+		"config_files":            cfg.files,
+		// What an operator staring at "Permission denied" actually needs.
+		"password_login_available":      passwordLoginAvailable(passAuth),
+		"root_password_login_available": rootPasswordLoginAvailable(passAuth, permitRoot),
 	}
-	if len(weakC) > 0 {
-		attrs["weak_ciphers"] = weakC
+	for attr, keyword := range map[string]string{
+		"permit_root_login_source":       "permitrootlogin",
+		"password_authentication_source": "passwordauthentication",
+		"permit_empty_passwords_source":  "permitemptypasswords",
+	} {
+		if src := cfg.source(keyword); src != "" {
+			attrs[attr] = src
+		}
 	}
-	if len(weakM) > 0 {
-		attrs["weak_macs"] = weakM
+	if weak := weakItems(cfg.value("ciphers"), weakCipherPatterns); len(weak) > 0 {
+		attrs["weak_ciphers"] = weak
 	}
-	if len(weakK) > 0 {
-		attrs["weak_kex"] = weakK
+	if weak := weakItems(cfg.value("macs"), weakMacPatterns); len(weak) > 0 {
+		attrs["weak_macs"] = weak
+	}
+	if weak := weakItems(cfg.value("kexalgorithms"), weakKexPatterns); len(weak) > 0 {
+		attrs["weak_kex"] = weak
 	}
 	return &model.Resource{
 		Type: "ssh_config", ID: "ssh:config", Name: "sshd",

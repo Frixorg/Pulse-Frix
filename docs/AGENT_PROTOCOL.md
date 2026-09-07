@@ -87,6 +87,44 @@ monitoring. The current version is `PROTOCOL_VERSION` in `packages/protocol`.
 Response returns the assigned `server_id`, `agent_id`, and a short-lived session
 credential. Enrollment tokens are single-use and expire quickly.
 
+### 1b. `reenroll` (agent → server, SIGNED)
+
+`POST /api/v1/agents/reenroll`, signed with the agent's own Ed25519 key using
+the same scheme as ingest.
+
+```json
+{
+  "installation_id": "…",
+  "public_key": "…",
+  "previous_agent_id": "agt_…",
+  "protocol_version": "1.0",
+  "fingerprint": { "hostname": "…", "os": "linux", "arch": "amd64" },
+  "enrollment_token": "pst_…"
+}
+```
+
+Enrollment tokens are single-use, so an agent whose binding the control plane
+has lost — a rebuilt database, an agent id that drifted — cannot enroll again
+and would otherwise be refused at ingest forever while its dashboard shows no
+servers at all. It still holds the keypair it enrolled with, and that is what
+this endpoint trusts.
+
+The server answers in one of three ways:
+
+| Situation | Result |
+|-----------|--------|
+| key is known and live | `200` with the existing `server_id` / `agent_id`; nothing is created |
+| key is known but REVOKED | `401`. A revocation has to stick; reinstall with a fresh token instead |
+| key is unknown | adopted only with a valid `enrollment_token` (`201`), otherwise `401` |
+
+The signature proves key possession, never authorisation — which is why an
+unknown key still needs a token, on exactly the terms a first install gets.
+
+The agent drives this itself: a `401`/`403` from ingest is treated as a
+credential failure rather than a transient one, and it re-binds and retries
+rather than buffering indefinitely. A control plane that predates this endpoint
+answers `404`, and the agent falls back to token enrollment.
+
 ### 2. `hello` / `heartbeat` (agent → server)
 
 Liveness + protocol negotiation + agent self-metrics (CPU/mem/net of the agent

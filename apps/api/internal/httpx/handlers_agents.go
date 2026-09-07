@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -78,26 +79,9 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srv := &model.Server{
-		ServerID:   auth.NewID("srv"),
-		Hostname:   req.Fingerprint["hostname"],
-		Mode:       "cloud",
-		Status:     model.HealthUnknown,
-		LastSeenAt: time.Now().UTC(),
-	}
-	if err := s.store.UpsertServer(tok.OrgID, srv); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not register server")
-		return
-	}
-	agent := &model.Agent{
-		OrgID:           tok.OrgID,
-		ServerID:        srv.ServerID,
-		AgentID:         auth.NewID("agt"),
-		PublicKey:       req.PublicKey,
-		ProtocolVersion: req.ProtocolVersion,
-		LastSeenAt:      time.Now().UTC(),
-	}
-	if err := s.store.CreateAgent(agent); err != nil {
+	srv, agent, err := s.registerAgent(tok.OrgID, req.PublicKey, req.ProtocolVersion,
+		req.Fingerprint["hostname"], time.Now().UTC())
+	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not register agent")
 		return
 	}
@@ -127,45 +111,22 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentID := r.Header.Get("X-Pulse-Agent-Id")
-	tsStr := r.Header.Get("X-Pulse-Timestamp")
-	nonce := r.Header.Get("X-Pulse-Nonce")
-	sigB64 := r.Header.Get("X-Pulse-Signature")
-	if agentID == "" || tsStr == "" || nonce == "" || sigB64 == "" {
+	if agentID == "" {
 		Fail(w, r, http.StatusUnauthorized, CodeAuth, "missing signature headers")
 		return
 	}
-
-	// Timestamp window (±60s) mitigates replay.
-	tsMillis, err := strconv.ParseInt(tsStr, 10, 64)
-	if err != nil || absDuration(time.Since(time.UnixMilli(tsMillis))) > 60*time.Second {
-		Fail(w, r, http.StatusUnauthorized, CodeAuth, "stale or invalid timestamp")
-		return
-	}
-	// Single-use nonce.
-	if !s.nonces().checkAndStore(nonce) {
-		Fail(w, r, http.StatusUnauthorized, CodeAuth, "replayed request")
-		return
-	}
-
 	agent, err := s.store.GetAgentByAgentID(agentID)
 	if err != nil {
-		Fail(w, r, http.StatusUnauthorized, CodeAuth, "unknown or revoked agent")
+		// The wording matters: this message reaches the agent's log, and it is
+		// the operator's whole next step. "Unknown agent" on its own has left
+		// people staring at an empty dashboard with nothing to act on.
+		Fail(w, r, http.StatusUnauthorized, CodeAuth,
+			"unknown or revoked agent — the agent should re-enroll; if it cannot, "+
+				"generate a fresh enrollment token and reinstall it on that host")
 		return
 	}
-	pub, err := base64.StdEncoding.DecodeString(agent.PublicKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		Fail(w, r, http.StatusUnauthorized, CodeAuth, "invalid agent key")
-		return
-	}
-	sig, err := base64.StdEncoding.DecodeString(sigB64)
-	if err != nil {
-		Fail(w, r, http.StatusUnauthorized, CodeAuth, "invalid signature encoding")
-		return
-	}
-	bodyHash := sha256.Sum256(body)
-	signingInput := "POST|/api/v1/agents/ingest|" + tsStr + "|" + nonce + "|" + hex.EncodeToString(bodyHash[:])
-	if !ed25519.Verify(ed25519.PublicKey(pub), []byte(signingInput), sig) {
-		Fail(w, r, http.StatusUnauthorized, CodeAuth, "signature verification failed")
+	if err := s.verifySignedRequest(r, body, agent.PublicKey, ingestPath); err != nil {
+		Fail(w, r, http.StatusUnauthorized, CodeAuth, err.Error())
 		return
 	}
 
@@ -254,4 +215,193 @@ func hostnameFromSnapshot(b json.RawMessage) string {
 	}
 	_ = json.Unmarshal(b, &s)
 	return s.Hostname
+}
+
+// Signed-request paths. The signature binds the path it was made for, so a
+// captured ingest request cannot be replayed against re-enrolment. They are
+// constants rather than r.URL.Path because a proxy that rewrites the path in
+// front of the API must not silently invalidate every agent's signature.
+const (
+	ingestPath   = "/api/v1/agents/ingest"
+	reenrollPath = "/api/v1/agents/reenroll"
+)
+
+// verifySignedRequest checks the Ed25519 proof carried in the Pulse headers
+// against the public key the caller names, over the exact bytes received.
+//
+// ingest passes the key it has ON RECORD for the agent id, which is what makes
+// it an authentication check. Re-enrolment passes the key FROM THE BODY, which
+// makes it only a proof of key possession — authorisation there comes from
+// already knowing the key, or from an enrollment token.
+func (s *Server) verifySignedRequest(r *http.Request, body []byte, publicKeyB64, path string) error {
+	tsStr := r.Header.Get("X-Pulse-Timestamp")
+	nonce := r.Header.Get("X-Pulse-Nonce")
+	sigB64 := r.Header.Get("X-Pulse-Signature")
+	if tsStr == "" || nonce == "" || sigB64 == "" {
+		return errors.New("missing signature headers")
+	}
+	// Timestamp window (±60s) mitigates replay.
+	tsMillis, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil || absDuration(time.Since(time.UnixMilli(tsMillis))) > 60*time.Second {
+		return errors.New("stale or invalid timestamp")
+	}
+	// Single-use nonce.
+	if !s.nonces().checkAndStore(nonce) {
+		return errors.New("replayed request")
+	}
+	pub, err := base64.StdEncoding.DecodeString(publicKeyB64)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return errors.New("invalid agent key")
+	}
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		return errors.New("invalid signature encoding")
+	}
+	bodyHash := sha256.Sum256(body)
+	signingInput := "POST|" + path + "|" + tsStr + "|" + nonce + "|" + hex.EncodeToString(bodyHash[:])
+	if !ed25519.Verify(ed25519.PublicKey(pub), []byte(signingInput), sig) {
+		return errors.New("signature verification failed")
+	}
+	return nil
+}
+
+// registerAgent creates the server row and the agent binding for a key this
+// control plane has just accepted. Shared by first-time enrolment and by the
+// re-enrolment path that adopts a key it has never seen before.
+func (s *Server) registerAgent(orgID, publicKey, protocolVersion, hostname string, now time.Time) (*model.Server, *model.Agent, error) {
+	srv := &model.Server{
+		ServerID:   auth.NewID("srv"),
+		Hostname:   hostname,
+		Mode:       "cloud",
+		Status:     model.HealthUnknown,
+		LastSeenAt: now,
+	}
+	if err := s.store.UpsertServer(orgID, srv); err != nil {
+		return nil, nil, err
+	}
+	agent := &model.Agent{
+		OrgID:           orgID,
+		ServerID:        srv.ServerID,
+		AgentID:         auth.NewID("agt"),
+		PublicKey:       publicKey,
+		ProtocolVersion: protocolVersion,
+		LastSeenAt:      now,
+	}
+	if err := s.store.CreateAgent(agent); err != nil {
+		return nil, nil, err
+	}
+	return srv, agent, nil
+}
+
+// --- re-enroll (agent, signed with its own key, rate-limited) ---
+
+type reenrollRequest struct {
+	InstallationID  string            `json:"installation_id"`
+	PublicKey       string            `json:"public_key"`
+	PreviousAgentID string            `json:"previous_agent_id"`
+	ProtocolVersion string            `json:"protocol_version"`
+	Fingerprint     map[string]string `json:"fingerprint"`
+	EnrollmentToken string            `json:"enrollment_token"`
+}
+
+// handleReenroll re-binds an agent whose credential this control plane no
+// longer accepts, without demanding a fresh enrollment token.
+//
+// It exists because enrollment tokens are single-use and short-lived, so an
+// agent that loses its binding — a control plane restarted on an ephemeral
+// store, a rebuilt database, an agent id that drifted — had no way back and
+// simply stopped reporting, for good. The agent still holds the Ed25519 key it
+// enrolled with, so this request is SIGNED with that key.
+//
+// Three outcomes, in order:
+//
+//   - the key is known and live    → hand back its existing ids (idempotent)
+//   - the key is known and REVOKED → refuse; a revocation has to stick
+//   - the key is unknown           → adopt it ONLY with a valid enrollment
+//     token, on exactly the terms a first-time install would get
+func (s *Server) handleReenroll(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+	if err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, "could not read body")
+		return
+	}
+	var req reenrollRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, "invalid request body")
+		return
+	}
+	if !supportedProtocols[req.ProtocolVersion] {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, "unsupported protocol version")
+		return
+	}
+	if req.PublicKey == "" {
+		Fail(w, r, http.StatusBadRequest, CodeValidation, "missing public key")
+		return
+	}
+	// Verified against the key IN THE BODY. That proves the caller holds the
+	// matching private key — the one thing that makes a tokenless re-bind safe
+	// — and nothing more, which is why an unknown key still needs a token.
+	if err := s.verifySignedRequest(r, body, req.PublicKey, reenrollPath); err != nil {
+		s.audit.Record("", req.InstallationID, "agent.reenroll", "failure", clientIP(r), nil)
+		Fail(w, r, http.StatusUnauthorized, CodeAuth, err.Error())
+		return
+	}
+
+	now := time.Now().UTC()
+	existing, lookupErr := s.store.GetAgentByPublicKey(req.PublicKey)
+	switch {
+	case lookupErr == nil && existing.RevokedAt != nil:
+		s.audit.Record(existing.OrgID, req.InstallationID, "agent.reenroll", "failure", clientIP(r),
+			map[string]any{"reason": "revoked", "agent": existing.AgentID})
+		Fail(w, r, http.StatusUnauthorized, CodeAuth,
+			"this agent was revoked, and re-enrolling cannot undo that. Uninstall the agent on that "+
+				"host, then install it again with a fresh enrollment token.")
+		return
+
+	case lookupErr == nil:
+		// Known and live: nothing to create. Hand back the binding it already
+		// has and refresh the server row so it stops looking offline.
+		_ = s.store.EnsureServer(existing.OrgID, existing.ServerID,
+			req.Fingerprint["hostname"], now, model.HealthHealthy)
+		s.audit.Record(existing.OrgID, req.InstallationID, "agent.reenroll", "success", clientIP(r),
+			map[string]any{"server_id": existing.ServerID, "agent_id": existing.AgentID, "path": "rebind"})
+		JSON(w, http.StatusOK, map[string]any{
+			"server_id": existing.ServerID,
+			"agent_id":  existing.AgentID,
+			"protocol":  req.ProtocolVersion,
+		})
+		return
+	}
+
+	// The key is unknown to this control plane, so a signature buys nothing on
+	// its own: it needs the same enrollment token a first-time install needs.
+	if req.EnrollmentToken == "" {
+		s.audit.Record("", req.InstallationID, "agent.reenroll", "failure", clientIP(r),
+			map[string]any{"reason": "unknown_key_no_token"})
+		Fail(w, r, http.StatusUnauthorized, CodeAuth,
+			"this control plane has no record of this agent. Generate a fresh enrollment token in "+
+				"the dashboard and re-run the install command on that host.")
+		return
+	}
+	tok, err := s.store.ConsumeEnrollmentToken(auth.HashToken(req.EnrollmentToken), now)
+	if err != nil {
+		s.audit.Record("", req.InstallationID, "agent.reenroll", "failure", clientIP(r),
+			map[string]any{"reason": "bad_token"})
+		Fail(w, r, http.StatusUnauthorized, CodeAuth,
+			"invalid or expired enrollment token — generate a fresh one in the dashboard")
+		return
+	}
+	srv, agent, err := s.registerAgent(tok.OrgID, req.PublicKey, req.ProtocolVersion,
+		req.Fingerprint["hostname"], now)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not register agent")
+		return
+	}
+	s.audit.Record(tok.OrgID, req.InstallationID, "agent.reenroll", "success", clientIP(r),
+		map[string]any{"server_id": srv.ServerID, "agent_id": agent.AgentID, "path": "adopt"})
+	JSON(w, http.StatusCreated, map[string]any{
+		"server_id": srv.ServerID,
+		"agent_id":  agent.AgentID,
+		"protocol":  req.ProtocolVersion,
+	})
 }

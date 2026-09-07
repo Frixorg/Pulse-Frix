@@ -6,9 +6,11 @@
 # Bring up:   ./installer/install.sh          (recommended — Discover→Plan→Apply)
 # or:         docker compose --env-file /opt/pulse/.env -p pulse up -d
 #
-# Persistence: the API defaults to an in-memory store. For durable storage build
-# the API with the pgx tag by setting API_TAGS=pgx (uses the pulse-postgres
-# service + apps/api/migrations).
+# Persistence: the API is built with the pgx tag by default, so the control
+# plane keeps accounts, servers and agent registrations in the pulse-postgres
+# service and survives a restart. Setting API_TAGS= (empty) builds the
+# in-memory store instead, which loses every agent registration on restart and
+# is refused outright when PULSE_ENV=production.
 # =============================================================================
 name: pulse
 
@@ -46,14 +48,14 @@ services:
     build:
       context: ./apps/api
       args:
-        TAGS: ${API_TAGS:-}
+        TAGS: ${API_TAGS:-pgx}
     container_name: pulse-api
     restart: unless-stopped
     environment:
       PULSE_API_ADDR: ":8080"
       PULSE_MODE: ${PULSE_MODE:-local}
       PULSE_ENV: ${PULSE_ENV:-production}
-      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL: ${DATABASE_URL:-postgres://pulse:pulse@pulse-postgres:5432/pulse?sslmode=disable}
       METRICS_URL: http://pulse-prometheus:9090
       PULSE_SESSION_SECRET: ${PULSE_SESSION_SECRET:-}
       PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:-}

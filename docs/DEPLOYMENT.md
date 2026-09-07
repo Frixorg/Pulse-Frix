@@ -69,16 +69,16 @@ docker compose -p pulse ps          # the isolated pulse-* stack
 ./installer/uninstall.sh            # removes ONLY Pulse; your services untouched
 ```
 
-**Persistence:** the API image defaults to an in-memory store. For durable data,
-rebuild the API with the pgx tag:
+**Persistence:** the API image is built with the pgx tag by default, so accounts,
+servers and agent registrations live in `pulse-postgres` and survive a restart.
+The schema is applied automatically at start-up from the embedded migrations —
+there is no separate psql step.
 
-```bash
-docker compose -p pulse build --build-arg API_TAGS=pgx pulse-api
-docker compose -p pulse up -d pulse-api
-# apply schema once:
-docker run --rm --network pulse-net -e PGPASSWORD=$POSTGRES_PASSWORD postgres:16-alpine \
-  psql -h pulse-postgres -U pulse -d pulse -f - < apps/api/migrations/0001_init.sql
-```
+Building without it (`API_TAGS=`) gives an in-memory store, which loses every
+account and agent registration on restart. Because that is indistinguishable
+from total data loss — an empty dashboard and every agent refused at ingest —
+the API refuses to start that way under `PULSE_ENV=production` unless you set
+`PULSE_ALLOW_EPHEMERAL_STORE=true`.
 
 ---
 
@@ -165,7 +165,7 @@ pulse status      # what Pulse is running
 
 ## 5. Production hardening checklist
 
-- Build the API with `API_TAGS=pgx` and apply migrations (durable storage).
+- Keep `API_TAGS=pgx` (the default) so storage is durable; never set `PULSE_ALLOW_EPHEMERAL_STORE`.
 - Strong, unique `POSTGRES_PASSWORD`, `PULSE_SESSION_SECRET`, `PULSE_JWT_SIGNING_KEY`.
 - Restrict the control-plane host's firewall to 80/443 (+ SSH).
 - Back up the `pulse-postgres-data` volume.

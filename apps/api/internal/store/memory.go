@@ -373,6 +373,25 @@ func (m *Memory) GetAgentByAgentID(agentID string) (*model.Agent, error) {
 	return &cp, nil
 }
 
+// GetAgentByPublicKey resolves an agent by the key it enrolled with, and
+// deliberately returns REVOKED agents too. Re-enrolment has to be able to tell
+// "I have never seen this key" from "an operator revoked this agent", because
+// silently reinstating the second one would undo a deliberate act.
+func (m *Memory) GetAgentByPublicKey(publicKey string) (*model.Agent, error) {
+	if publicKey == "" {
+		return nil, ErrNotFound
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, a := range m.agents {
+		if a.PublicKey == publicKey {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 func (m *Memory) RevokeAgent(orgID, id string, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

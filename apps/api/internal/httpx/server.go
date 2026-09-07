@@ -151,6 +151,10 @@ func (s *Server) Handler() http.Handler {
 	// Agents & enrollment
 	mux.HandleFunc("POST /api/v1/agents/enrollment-tokens", s.requirePerm(rbac.ServerManage, s.handleCreateEnrollment))
 	mux.Handle("POST /api/v1/agents/enroll", s.enrollLimiter.Middleware()(http.HandlerFunc(s.handleEnroll)))
+	// Signed re-bind for an agent this control plane stopped recognising. Same
+	// per-IP limiter as enrolment: one host recovering is 3 attempts then a
+	// trickle, which its 60s retry never runs into.
+	mux.Handle("POST /api/v1/agents/reenroll", s.enrollLimiter.Middleware()(http.HandlerFunc(s.handleReenroll)))
 	mux.Handle("POST /api/v1/agents/ingest", s.ingestLimiter.Middleware()(http.HandlerFunc(s.handleIngest)))
 	mux.HandleFunc("POST /api/v1/agents/{id}/revoke", s.requirePerm(rbac.ServerManage, s.handleRevokeAgent))
 

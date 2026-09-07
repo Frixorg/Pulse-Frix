@@ -33,6 +33,10 @@ var (
 	ErrNoAuth          = errors.New("provide a password or a private key")
 	ErrBadKey          = errors.New("the private key could not be parsed")
 	ErrAuth            = errors.New("the server rejected these credentials")
+	// ErrNoPasswordAuth separates "wrong password" from "this daemon never
+	// offered a password prompt at all". The two are indistinguishable at the
+	// prompt and have completely different fixes.
+	ErrNoPasswordAuth  = errors.New("this host does not offer password logins for that user")
 	ErrHostKeyMismatch = errors.New("the host key does not match the fingerprint this browser trusted")
 	ErrNotFound        = errors.New("ssh session not found")
 	ErrAlreadyAttached = errors.New("this ssh session is already open in another tab")

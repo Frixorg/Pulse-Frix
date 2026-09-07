@@ -4,7 +4,8 @@
 //
 //	go get github.com/jackc/pgx/v5
 //
-// Apply migrations first (see ./migrations): psql "$DATABASE_URL" -f migrations/0001_init.sql
+// The schema is applied by Migrate() at start-up from the embedded files in
+// ./migrations, so no separate psql step is needed.
 package store
 
 import (
@@ -12,6 +13,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 
 	"github.com/frix-me/pulse/api/internal/auth"
 	"github.com/frix-me/pulse/api/internal/model"
+	"github.com/frix-me/pulse/api/migrations"
 )
 
 // Postgres implements Store against PostgreSQL.
@@ -46,6 +50,33 @@ func NewPostgres(url string) (*Postgres, error) {
 		time.Sleep(2 * time.Second)
 	}
 	return nil, fmt.Errorf("postgres unreachable after retries: %w", lastErr)
+}
+
+// Migrate applies every embedded migration in lexical filename order.
+//
+// It runs on every start, which is safe because each file is idempotent, and
+// it closes a real gap: the schema used to be applied by a separate psql step
+// that only deploy.sh performed. An installer path that skipped it left the
+// API serving an empty database — indistinguishable, from the dashboard and
+// from every agent, from a control plane that had lost all of its data.
+func (p *Postgres) Migrate() error {
+	names, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		return err
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		// No arguments, so the driver uses the simple query protocol and the
+		// whole file (BEGIN ... COMMIT included) executes as one batch.
+		if _, err := p.db.Exec(string(body)); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) FindLoginByEmail(email string) (*model.User, *model.Membership, error) {
@@ -349,6 +380,36 @@ func (p *Postgres) GetAgentByAgentID(agentID string) (*model.Agent, error) {
 	}
 	if revoked.Valid {
 		return nil, ErrNotFound
+	}
+	return a, nil
+}
+
+// GetAgentByPublicKey resolves an agent by the key it enrolled with, and
+// deliberately returns REVOKED agents too. Re-enrolment has to be able to tell
+// "I have never seen this key" from "an operator revoked this agent", because
+// silently reinstating the second one would undo a deliberate act.
+//
+// A live agent is preferred over a revoked one when both carry the same key.
+func (p *Postgres) GetAgentByPublicKey(publicKey string) (*model.Agent, error) {
+	if publicKey == "" {
+		return nil, ErrNotFound
+	}
+	a := &model.Agent{}
+	var revoked sql.NullTime
+	err := p.db.QueryRow(`
+		SELECT id,org_id,server_id,agent_id,public_key,protocol_version,revoked_at,COALESCE(last_seen_at,to_timestamp(0))
+		FROM agents WHERE public_key=$1
+		ORDER BY revoked_at NULLS FIRST, last_seen_at DESC
+		LIMIT 1`, publicKey).
+		Scan(&a.ID, &a.OrgID, &a.ServerID, &a.AgentID, &a.PublicKey, &a.ProtocolVersion, &revoked, &a.LastSeenAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if revoked.Valid {
+		a.RevokedAt = &revoked.Time
 	}
 	return a, nil
 }

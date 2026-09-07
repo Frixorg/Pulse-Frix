@@ -237,3 +237,15 @@ func attrStrings(m map[string]any, k string) []string {
 	}
 	return out
 }
+
+// sshdEvidence names the file a setting actually came from. On a cloud image
+// the effective sshd policy is almost never written in /etc/ssh/sshd_config —
+// it comes from a drop-in that sshd parses first — so pointing at the wrong
+// file sends an operator editing something that will never take effect.
+func sshdEvidence(m map[string]any, sourceKey string) string {
+	src := attrString(m, sourceKey)
+	if src == "" {
+		return ""
+	}
+	return "set in " + src
+}

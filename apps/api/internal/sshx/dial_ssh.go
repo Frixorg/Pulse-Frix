@@ -98,6 +98,12 @@ func dialClient(ctx context.Context, c Credentials) (*gossh.Client, string, erro
 		if mismatch {
 			return nil, fingerprint, ErrHostKeyMismatch
 		}
+		// "Wrong password" and "this daemon never offered a password prompt"
+		// are the same red banner to an operator, and only one of them is
+		// worth retyping a password over.
+		if passwordNeverOffered(c, err) {
+			return nil, fingerprint, fmt.Errorf("%w (%v)", ErrNoPasswordAuth, err)
+		}
 		return nil, fingerprint, fmt.Errorf("%w (%v)", ErrAuth, err)
 	}
 	_ = conn.SetDeadline(time.Time{}) // sessions on this client are long-lived
@@ -201,16 +207,46 @@ else
   # wrote earlier — matched on its exact comment, so nobody else's keys are
   # touched — then append the new one. The rewrite goes through a temp file and
   # a rename, so a failure part-way leaves authorized_keys exactly as it was.
-  PREV=$(awk -v c="$COMMENT" '$NF == c' "$AK" 2>/dev/null | wc -l | tr -d " ")
+  #
+  # authorized_keys is the ONLY file Pulse ever writes on a host, and rewriting
+  # it wrong is indistinguishable from locking the operator out. So the rewrite
+  # proves its own tooling works first, keeps a backup, and refuses to replace
+  # the file unless every line it meant to keep is still present.
+  if ! printf 'probe\n' | awk '{print $NF}' >/dev/null 2>&1; then
+    echo "PULSE-STEP:key:error:awk is missing here, so $AK cannot be rewritten safely — nothing was changed"
+    exit 1
+  fi
+  # Count with grep, not awk. A guard that trusts the same tool it is checking
+  # cannot catch that tool returning nothing, which is the exact failure that
+  # would empty the file.
+  ORIG=$(grep -c '' "$AK" 2>/dev/null)
+  PREV=$(grep -cF -- " $COMMENT" "$AK" 2>/dev/null)
   TMP="$AK.pulse.$$"
-  awk -v c="$COMMENT" '$NF != c' "$AK" > "$TMP" 2>/dev/null
+  if ! awk -v c="$COMMENT" '$NF != c' "$AK" > "$TMP" 2>/dev/null; then
+    rm -f "$TMP" 2>/dev/null
+    echo "PULSE-STEP:key:error:could not filter $AK — nothing was changed"
+    exit 1
+  fi
+  KEPT=$(grep -c '' "$TMP" 2>/dev/null)
+  DROPPED=$(( ${ORIG:-0} - ${KEPT:-0} ))
+  # The filter may drop Pulse's own earlier keys and nothing else. Anything
+  # outside that range means it misbehaved, and replacing authorized_keys with
+  # its output would take away access the operator still needs.
+  if [ "$DROPPED" -lt 0 ] || [ "$DROPPED" -gt "${PREV:-0}" ]; then
+    rm -f "$TMP" 2>/dev/null
+    echo "PULSE-STEP:key:error:refusing to rewrite $AK — the filtered copy lost lines it had to keep"
+    exit 1
+  fi
+  # Exactly what was there before, so a bad outcome is one mv away from undone.
+  cp -p "$AK" "$AK.pulse-backup" 2>/dev/null || cp "$AK" "$AK.pulse-backup" 2>/dev/null
+  chmod 600 "$AK.pulse-backup" 2>/dev/null
   printf '%%s\n' "$KEY" >> "$TMP" 2>/dev/null
   chmod 600 "$TMP" 2>/dev/null
   if mv "$TMP" "$AK" 2>/dev/null; then
     if [ "${PREV:-0}" -gt 0 ] 2>/dev/null; then
-      echo "PULSE-STEP:key:ok:replaced the previous Pulse key in $AK — your other keys are untouched"
+      echo "PULSE-STEP:key:ok:replaced the previous Pulse key in $AK — your other keys are untouched (backup: $AK.pulse-backup)"
     else
-      echo "PULSE-STEP:key:ok:public key appended to $AK"
+      echo "PULSE-STEP:key:ok:public key appended to $AK (backup: $AK.pulse-backup)"
     fi
   else
     rm -f "$TMP" 2>/dev/null
@@ -226,12 +262,37 @@ if command -v restorecon >/dev/null 2>&1; then
   fi
 fi
 
-# Read-only: report the sshd settings that decide whether key login works.
-CFG=$(sshd -T 2>/dev/null || cat /etc/ssh/sshd_config 2>/dev/null || true)
-echo "PULSE-INFO:pubkey_authentication:$(printf '%%s\n' "$CFG" | grep -i '^[[:space:]]*pubkeyauthentication' | tail -1 | awk '{print tolower($2)}')"
-echo "PULSE-INFO:password_authentication:$(printf '%%s\n' "$CFG" | grep -i '^[[:space:]]*passwordauthentication' | tail -1 | awk '{print tolower($2)}')"
-echo "PULSE-INFO:permit_root_login:$(printf '%%s\n' "$CFG" | grep -i '^[[:space:]]*permitrootlogin' | tail -1 | awk '{print tolower($2)}')"
-echo "PULSE-INFO:port:$(printf '%%s\n' "$CFG" | grep -i '^[[:space:]]*port[[:space:]]' | tail -1 | awk '{print $2}')"
+# Read-only: report the sshd settings that decide whether a key — or a password
+# — can be used at all.
+#
+# "sshd -T" is authoritative: it prints the RESOLVED config, one line per
+# keyword. It needs root, so the fallback has to resolve the config by hand,
+# and two rules decide the answer:
+#
+#   * Debian and Ubuntu put "Include /etc/ssh/sshd_config.d/*.conf" at the TOP
+#     of sshd_config, so the drop-ins are parsed FIRST;
+#   * sshd keeps the FIRST value it reads for a keyword, never the last.
+#
+# So the drop-ins are concatenated ahead of sshd_config and every lookup takes
+# head -1. Reading sshd_config alone, or taking the last match, reports the
+# exact opposite of the truth on a hardened cloud image.
+CFG=$(sshd -T 2>/dev/null)
+if [ -n "$CFG" ]; then
+  SOURCE="sshd -T (resolved)"
+else
+  SOURCE="sshd_config.d drop-ins, then sshd_config"
+  CFG=$(cat /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config 2>/dev/null || true)
+fi
+# Accepts "Keyword value" and "Keyword=value", which sshd treats identically.
+sshd_value() {
+  printf '%%s\n' "$CFG" | grep -Ei "^[[:space:]]*$1([[:space:]]|=)" | head -1 |
+    tr '=' ' ' | awk '{print tolower($2)}'
+}
+echo "PULSE-INFO:config_source:$SOURCE"
+echo "PULSE-INFO:pubkey_authentication:$(sshd_value pubkeyauthentication)"
+echo "PULSE-INFO:password_authentication:$(sshd_value passwordauthentication)"
+echo "PULSE-INFO:permit_root_login:$(sshd_value permitrootlogin)"
+echo "PULSE-INFO:port:$(sshd_value port)"
 echo "PULSE-INFO:user:$(id -un 2>/dev/null || whoami 2>/dev/null)"
 echo "PULSE-STEP:done:ok:setup finished"
 `
@@ -434,4 +495,51 @@ func clamp(v, def int) int {
 		return def
 	}
 	return v
+}
+
+// attemptedMethods pulls the method list out of x/crypto's authentication
+// error ("...attempted methods [none publickey], no supported methods
+// remain"). The client only ever attempts a method the server advertised, so
+// this list doubles as "what the daemon was willing to consider".
+//
+// It degrades to (nil, false) if the wording ever changes, and every caller
+// treats that as "don't know" rather than guessing.
+func attemptedMethods(err error) ([]string, bool) {
+	const marker = "attempted methods ["
+	msg := err.Error()
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return nil, false
+	}
+	rest := msg[i+len(marker):]
+	j := strings.Index(rest, "]")
+	if j < 0 {
+		return nil, false
+	}
+	return strings.Fields(rest[:j]), true
+}
+
+// passwordNeverOffered reports that we arrived with a password and the daemon
+// never gave us anywhere to put it.
+//
+// This is the PermitRootLogin prohibit-password / PasswordAuthentication no
+// case. sshd advertises publickey alone and disconnects, and OpenSSH clients
+// print "No supported authentication methods available (server sent:
+// publickey)" — which reads, to everyone who has ever seen it, like a rejected
+// password. No amount of retyping fixes it.
+func passwordNeverOffered(c Credentials, err error) bool {
+	if c.Password == "" {
+		return false
+	}
+	methods, ok := attemptedMethods(err)
+	if !ok {
+		return false
+	}
+	for _, m := range methods {
+		// The password actually got tried, so the credential itself is wrong.
+		if m == "password" || m == "keyboard-interactive" {
+			return false
+		}
+	}
+	return true
 }

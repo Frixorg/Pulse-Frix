@@ -75,6 +75,11 @@ type Store interface {
 	ConsumeEnrollmentToken(hash string, now time.Time) (*model.EnrollmentToken, error)
 	CreateAgent(a *model.Agent) error
 	GetAgentByAgentID(agentID string) (*model.Agent, error)
+	// GetAgentByPublicKey resolves an agent by the Ed25519 key it enrolled
+	// with. Unlike GetAgentByAgentID it ALSO returns revoked agents, so signed
+	// re-enrolment can refuse a deliberately revoked agent rather than
+	// silently reinstating it.
+	GetAgentByPublicKey(publicKey string) (*model.Agent, error)
 	RevokeAgent(orgID, id string, now time.Time) error
 
 	// --- discovery & metrics (latest snapshot per server) ---

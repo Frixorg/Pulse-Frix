@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -27,6 +28,26 @@ import (
 	"github.com/frix-me/pulse/agent/internal/version"
 )
 
+// ErrUnauthorized means the control plane refused this agent's credential
+// outright: the agent id is unknown, revoked, or bound to a different key.
+//
+// It is deliberately distinct from a transient failure. Retrying it is
+// pointless — nothing about the next attempt will differ — and treating it as
+// transient is how an agent ends up buffering forever while its dashboard
+// shows no servers at all. The caller is expected to re-enroll instead.
+var ErrUnauthorized = errors.New("control plane rejected this agent credential")
+
+// ErrReenrollUnsupported means this control plane predates the signed
+// re-enrolment endpoint. The caller falls back to token enrolment rather than
+// mistaking an older server for a refusal.
+var ErrReenrollUnsupported = errors.New("control plane has no re-enrolment endpoint")
+
+const (
+	enrollPath   = "/api/v1/agents/enroll"
+	reenrollPath = "/api/v1/agents/reenroll"
+	ingestPath   = "/api/v1/agents/ingest"
+)
+
 // EnrollRequest is sent (unsigned, authenticated by the enrollment token) to
 // register the agent and its public key with the control plane.
 type EnrollRequest struct {
@@ -35,6 +56,22 @@ type EnrollRequest struct {
 	PublicKey       string            `json:"public_key"`
 	ProtocolVersion string            `json:"protocol_version"`
 	Fingerprint     map[string]string `json:"fingerprint"`
+}
+
+// ReenrollRequest re-binds an agent that already holds a keypair. Unlike
+// EnrollRequest it is SIGNED with that keypair, and possession of the key is
+// what the control plane trusts: the enrollment token is single-use and is
+// long spent by the time an agent needs to recover.
+type ReenrollRequest struct {
+	InstallationID  string            `json:"installation_id"`
+	PublicKey       string            `json:"public_key"`
+	PreviousAgentID string            `json:"previous_agent_id,omitempty"`
+	ProtocolVersion string            `json:"protocol_version"`
+	Fingerprint     map[string]string `json:"fingerprint"`
+	// EnrollmentToken is sent only when the agent still holds one. It lets a
+	// control plane that has genuinely never seen this key adopt it, instead
+	// of refusing an agent that has no other way back in.
+	EnrollmentToken string `json:"enrollment_token,omitempty"`
 }
 
 // EnrollResponse carries the server-assigned identifiers.
@@ -51,7 +88,7 @@ func Enroll(ctx context.Context, baseURL string, req EnrollRequest) (*EnrollResp
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/v1/agents/enroll", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+enrollPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +101,47 @@ func Enroll(ctx context.Context, baseURL string, req EnrollRequest) (*EnrollResp
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("enroll failed: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("enroll failed: %s", serverMessage(resp))
+	}
+	var out EnrollResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Reenroll re-binds an agent the control plane no longer recognises, proving
+// identity with the agent's own key rather than a token it can no longer have.
+//
+// ErrUnauthorized here is meaningful and final: the control plane has no record
+// of this key and no token was accepted, so a human has to issue a fresh
+// tracking key. Every other error is worth retrying.
+func Reenroll(ctx context.Context, baseURL string, signer ed25519.PrivateKey, req ReenrollRequest) (*EnrollResponse, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+reenrollPath, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	signRequest(httpReq, signer, req.PreviousAgentID, reenrollPath, payload)
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	// A control plane that predates this endpoint answers 404. That is an old
+	// server, not a refusal, so the caller falls back to token enrolment.
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrReenrollUnsupported
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, serverMessage(resp))
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("reenroll failed: %s", serverMessage(resp))
 	}
 	var out EnrollResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -91,6 +168,10 @@ func New(baseURL, agentID string, signer ed25519.PrivateKey) *Client {
 	}
 }
 
+// Rebind points the client at the agent id a re-enrolment just issued. It is
+// called from the agent's single send loop, between sends.
+func (c *Client) Rebind(agentID string) { c.agentID = agentID }
+
 // Envelope wraps every message with its type and the sending agent.
 type Envelope struct {
 	Type      string          `json:"type"`
@@ -100,8 +181,10 @@ type Envelope struct {
 	Body      json.RawMessage `json:"body"`
 }
 
-// Send posts a message of the given type with a JSON body to /api/v1/agents/ingest.
-// It signs the request and retries transient failures with exponential backoff.
+// Send posts a message of the given type with a JSON body to the ingest
+// endpoint. It signs the request and retries transient failures with
+// exponential backoff. A rejected credential comes back immediately, wrapped in
+// ErrUnauthorized, because no number of retries will change it.
 func (c *Client) Send(ctx context.Context, msgType string, body any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -127,41 +210,33 @@ func (c *Client) Send(ctx context.Context, msgType string, body any) error {
 				return err
 			}
 		}
-		if err := c.doSigned(ctx, "/api/v1/agents/ingest", payload); err != nil {
-			lastErr = err
-			continue
+		err := c.doSigned(ctx, ingestPath, payload)
+		if err == nil {
+			return nil
 		}
-		return nil
+		if errors.Is(err, ErrUnauthorized) {
+			return err
+		}
+		lastErr = err
 	}
 	return fmt.Errorf("send %s failed after %d attempts: %w", msgType, maxAttempts, lastErr)
 }
 
 func (c *Client) doSigned(ctx context.Context, path string, payload []byte) error {
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
-	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	nonce := newNonce()
-	bodyHash := sha256.Sum256(payload)
-
-	// Signed message binds method, path, timestamp, nonce and body hash.
-	signingInput := fmt.Sprintf("POST|%s|%s|%s|%s", path, ts, nonce, hex.EncodeToString(bodyHash[:]))
-	sig := ed25519.Sign(c.signer, []byte(signingInput))
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", version.UserAgent())
-	req.Header.Set("X-Pulse-Agent-Id", c.agentID)
-	req.Header.Set("X-Pulse-Timestamp", ts)
-	req.Header.Set("X-Pulse-Nonce", nonce)
-	req.Header.Set("X-Pulse-Signature", base64.StdEncoding.EncodeToString(sig))
+	signRequest(req, c.signer, c.agentID, path, payload)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("%w: %s", ErrUnauthorized, serverMessage(resp))
+	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
 		return fmt.Errorf("server status %d (retryable)", resp.StatusCode)
@@ -170,6 +245,42 @@ func (c *Client) doSigned(ctx context.Context, path string, payload []byte) erro
 		return fmt.Errorf("server status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// signRequest signs a payload and sets the headers that carry the proof. The
+// signed message binds method, path, timestamp, nonce and body hash, so a
+// captured request cannot be replayed against a different endpoint.
+func signRequest(req *http.Request, signer ed25519.PrivateKey, agentID, path string, payload []byte) {
+	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	nonce := newNonce()
+	bodyHash := sha256.Sum256(payload)
+	signingInput := fmt.Sprintf("POST|%s|%s|%s|%s", path, ts, nonce, hex.EncodeToString(bodyHash[:]))
+	sig := ed25519.Sign(signer, []byte(signingInput))
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", version.UserAgent())
+	req.Header.Set("X-Pulse-Agent-Id", agentID)
+	req.Header.Set("X-Pulse-Timestamp", ts)
+	req.Header.Set("X-Pulse-Nonce", nonce)
+	req.Header.Set("X-Pulse-Signature", base64.StdEncoding.EncodeToString(sig))
+}
+
+// serverMessage pulls the human-readable message out of an API error body, so
+// the agent log says what the control plane actually objected to instead of a
+// bare status code. That sentence is usually the operator's whole next step.
+func serverMessage(resp *http.Response) string {
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&body); err != nil {
+		return resp.Status
+	}
+	if body.Error.Message == "" {
+		return resp.Status
+	}
+	return body.Error.Message
 }
 
 func newNonce() string {

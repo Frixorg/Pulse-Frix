@@ -66,11 +66,11 @@ services:
     build:
       context: ../apps/api
       args:
-        # Default: in-memory store (zero external deps, always builds).
-        # For durable Postgres storage set API_TAGS=pgx in your .env and rebuild
-        # (see the persistence note in docs/DEPLOYMENT.md). The SSH console
-        # needs no tag — it is in the default build (docs/SSH_CONSOLE.md).
-        TAGS: ${API_TAGS:-}
+        # Default: the PostgreSQL adapter, so accounts, servers and agent
+        # registrations survive a restart. Setting API_TAGS= (empty) builds the
+        # in-memory store, which forgets every agent on restart and is refused
+        # outright under PULSE_ENV=production. The SSH console needs no tag.
+        TAGS: ${API_TAGS:-pgx}
     container_name: pulse-api
     restart: unless-stopped
     environment:
@@ -83,6 +83,11 @@ services:
       PULSE_JWT_SIGNING_KEY: ${PULSE_JWT_SIGNING_KEY:-}
       PULSE_BOOTSTRAP_EMAIL: ${PULSE_BOOTSTRAP_EMAIL:-}
       PULSE_BOOTSTRAP_PASSWORD: ${PULSE_BOOTSTRAP_PASSWORD:-}
+      # Optional. When set (to the same value as AGENT_ENROLLMENT_TOKEN), the
+      # API re-seeds this token on every start, so the control plane's OWN agent
+      # can re-enroll itself after the agents table is rebuilt. Leave it unset
+      # and that agent needs a fresh tracking key by hand instead.
+      PULSE_BOOTSTRAP_ENROLLMENT_TOKEN: ${PULSE_BOOTSTRAP_ENROLLMENT_TOKEN:-}
       # Browser SSH console (docs/SSH_CONSOLE.md). On by default; set
       # PULSE_SSH_CONSOLE=false in your .env to remove the terminal.
       PULSE_SSH_CONSOLE: ${PULSE_SSH_CONSOLE:-true}

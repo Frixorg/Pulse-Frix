@@ -102,6 +102,7 @@ CRUD scoped to the caller's org; `user.manage` / `org.manage` required for write
 |--------|------|-------|
 | POST | `/agents/enrollment-tokens` | `server.manage`; returns short-lived token |
 | POST | `/agents/enroll` | called by the agent with a token (rate-limited) |
+| POST | `/agents/reenroll` | signed with the agent's own key. Re-binds an agent this control plane stopped recognising, with no fresh token needed. Refuses a revoked agent, and needs a valid enrollment token for a key it has never seen. |
 | GET | `/agents/{id}` | status, protocol version, last seen |
 | POST | `/agents/{id}/revoke` | `server.manage`; revokes identity |
 

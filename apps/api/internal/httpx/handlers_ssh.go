@@ -374,6 +374,14 @@ func (s *Server) handleSSHClose(w http.ResponseWriter, r *http.Request) {
 // while the UI gets a sentence that says what to do next.
 func sshUserMessage(err error) string {
 	switch {
+	case errors.Is(err, sshx.ErrNoPasswordAuth):
+		return "This host never offered a password prompt — sshd advertised publickey only, so no " +
+			"password can work here. That is PermitRootLogin prohibit-password or " +
+			"PasswordAuthentication no. On a cloud image it is almost always set in a drop-in " +
+			"under /etc/ssh/sshd_config.d/ rather than in sshd_config itself, because sshd includes " +
+			"those first and keeps the FIRST value it reads. Connect with a private key, or as a " +
+			"non-root user the host still allows a password. `sudo sshd -T | grep -Ei " +
+			"'permitrootlogin|passwordauthentication'` on the host prints the values actually in force."
 	case errors.Is(err, sshx.ErrAuth):
 		return "The server rejected these credentials. Check the username and password — " +
 			"or use a private key, since many hosts set PasswordAuthentication no."
@@ -397,6 +405,10 @@ func sshFailure(err error) (int, string) {
 		return http.StatusNotImplemented, CodeConfig
 	case errors.Is(err, sshx.ErrHostKeyMismatch):
 		return http.StatusConflict, "SSH_HOST_KEY_MISMATCH"
+	case errors.Is(err, sshx.ErrNoPasswordAuth):
+		// Same "bad input" family as ErrAuth, but its own code: the UI offers
+		// the key form instead of asking for the password again.
+		return http.StatusBadRequest, "SSH_PASSWORD_AUTH_UNAVAILABLE"
 	case errors.Is(err, sshx.ErrAuth), errors.Is(err, sshx.ErrNoAuth), errors.Is(err, sshx.ErrBadKey):
 		// Deliberately NOT 401: that status means "your Pulse session is not
 		// valid", and clients (and proxies) act on it by bouncing you to the

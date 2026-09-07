@@ -1,10 +1,13 @@
 # syntax=docker/dockerfile:1
 # Pulse control-plane API image.
 #
-# The default build is what you want: in-memory store, browser SSH console
-# included. Optional build args:
-#   --build-arg TAGS=pgx            PostgreSQL store adapter (fetches pgx)
+# Build args:
+#   --build-arg TAGS=pgx            PostgreSQL store (what compose passes by
+#                                   default; fetches the pgx driver)
 #   --build-arg TAGS=nosshconsole   drop the SSH client (pure-stdlib binary)
+#
+# With no TAGS the binary can only store data in memory, so it refuses to start
+# under PULSE_ENV=production unless PULSE_ALLOW_EPHEMERAL_STORE=true.
 # Tags combine: --build-arg TAGS="pgx nosshconsole".
 FROM golang:1.22-alpine AS build
 WORKDIR /src

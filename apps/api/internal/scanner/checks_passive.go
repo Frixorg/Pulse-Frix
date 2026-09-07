@@ -180,15 +180,30 @@ func passiveChecks() []checkDef {
 							ID: "ssh-root", Severity: SeverityMedium, CVSS: 6.5, CWE: "CWE-284",
 							Title: "Root SSH login is permitted", Resource: "sshd_config",
 							Detail:         "PermitRootLogin is 'yes' — remote root logins widen the blast radius of a compromised key or password.",
-							Recommendation: "Set PermitRootLogin prohibit-password (or no) and use a sudo user.",
+							Evidence:       sshdEvidence(cfg.Attributes, "permit_root_login_source"),
+							Recommendation: "Set PermitRootLogin prohibit-password (or no) and use a sudo user. Confirm you can log in as that sudo user first.",
 						})
 					}
-					if attrString(cfg.Attributes, "password_authentication") == "yes" {
+					// The agent resolves this with sshd's own first-match-wins
+					// rules. Older agents send only the raw directive, where an
+					// ABSENT value still means yes — the case a bare
+					// == "yes" comparison misses entirely.
+					passwords := attrString(cfg.Attributes, "password_authentication") != "no"
+					if v, ok := cfg.Attributes["password_login_available"].(bool); ok {
+						passwords = v
+					}
+					if passwords {
 						emit(Finding{
 							ID: "ssh-passauth", Severity: SeverityLow, CVSS: 3.7, CWE: "CWE-307",
 							Title: "SSH password authentication is enabled", Resource: "sshd_config",
-							Detail:         "PasswordAuthentication 'yes' allows brute-forceable password logins.",
-							Recommendation: "Prefer key-based auth: set PasswordAuthentication no.",
+							Detail:   "PasswordAuthentication allows brute-forceable password logins.",
+							Evidence: sshdEvidence(cfg.Attributes, "password_authentication_source"),
+							// Turning this off before key login is proven is the
+							// single most common way people lock themselves out
+							// of their own VPS, so the order is part of the advice.
+							Recommendation: "Prefer key-based auth. First authorise your key and confirm a fresh " +
+								"session logs in with it, keep that session open, then set PasswordAuthentication no " +
+								"and reload sshd — verifying in a second terminal before you close the first.",
 						})
 					}
 				}
